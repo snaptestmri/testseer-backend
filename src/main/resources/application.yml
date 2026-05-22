@@ -29,13 +29,13 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+  cloud:
+    gcp:
+      pubsub:
+        project-id: ${GCP_PROJECT_ID:testseer-dev}
 
 testseer:
   stale-threshold-minutes: 60
-
-spring.cloud.gcp:
-  pubsub:
-    project-id: ${GCP_PROJECT_ID:testseer-dev}
 
 logging:
   level:
