@@ -94,4 +94,20 @@ class DatabaseMigrationTest extends AbstractIntegrationTest {
                 "file_path", "reason_code", "detail", "indexed_at"
         );
     }
+
+    @Test
+    void analysisRunsTableExists() {
+        List<String> columns = jdbcClient.sql("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'analysis_runs'
+                """)
+                .query(String.class)
+                .list();
+
+        assertThat(columns).contains(
+                "job_id", "org_id", "service_id", "commit_sha",
+                "job_type", "status", "attempt",
+                "enqueued_at", "started_at", "completed_at", "error_detail"
+        );
+    }
 }
