@@ -47,4 +47,20 @@ class DatabaseMigrationTest extends AbstractIntegrationTest {
                 "fact_schema_version", "indexed_at"
         );
     }
+
+    @Test
+    void outboundCallFactsTableExists() {
+        List<String> columns = jdbcClient.sql("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'outbound_call_facts'
+                """)
+                .query(String.class)
+                .list();
+
+        assertThat(columns).contains(
+                "id", "org_id", "repo", "service_id", "commit_sha",
+                "source_symbol", "http_method", "path",
+                "snapshot_type", "evidence_source", "confidence", "indexed_at"
+        );
+    }
 }
