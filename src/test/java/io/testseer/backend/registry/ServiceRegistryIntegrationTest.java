@@ -17,6 +17,9 @@ class ServiceRegistryIntegrationTest extends AbstractIntegrationTest {
     ServiceRegistryRepository repository;
 
     @Autowired
+    ServiceRegistryService service;
+
+    @Autowired
     JdbcClient jdbcClient;
 
     @BeforeEach
@@ -42,5 +45,49 @@ class ServiceRegistryIntegrationTest extends AbstractIntegrationTest {
         assertThat(found.get().orgId()).isEqualTo("acme");
         assertThat(found.get().serviceName()).isEqualTo("orders");
         assertThat(found.get().enabled()).isTrue();
+    }
+
+    @Test
+    void registerService_returnsServiceEntry() {
+        var req = new RegistrationRequest(
+                "acme", "order-service", "orders", "MAVEN",
+                "service", List.of("src/main/java"), List.of("src/test/java"), "platform"
+        );
+
+        ServiceEntry result = service.register(req);
+
+        assertThat(result.orgId()).isEqualTo("acme");
+        assertThat(result.repo()).isEqualTo("order-service");
+        assertThat(result.enabled()).isTrue();
+        assertThat(result.serviceId()).isNotBlank();
+    }
+
+    @Test
+    void register_throwsDuplicateException_whenSameOrgRepoService() {
+        var req = new RegistrationRequest(
+                "acme", "order-service", "orders", "MAVEN",
+                null, null, null, null
+        );
+        service.register(req);
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                DuplicateServiceException.class,
+                () -> service.register(req)
+        );
+    }
+
+    @Test
+    void disable_setsEnabledFalse_withoutDeletingEntry() {
+        var req = new RegistrationRequest(
+                "acme", "order-service", "orders", "MAVEN",
+                null, null, null, null
+        );
+        ServiceEntry entry = service.register(req);
+
+        service.disable(entry.serviceId());
+
+        Optional<ServiceEntry> found = repository.findById(entry.serviceId());
+        assertThat(found).isPresent();
+        assertThat(found.get().enabled()).isFalse();
     }
 }
