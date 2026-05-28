@@ -4,6 +4,7 @@ import io.testseer.backend.AbstractIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import java.util.List;
@@ -21,6 +22,9 @@ class ServiceRegistryIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     JdbcClient jdbcClient;
+
+    @Autowired
+    TestRestTemplate restTemplate;
 
     @BeforeEach
     void cleanup() {
@@ -89,5 +93,26 @@ class ServiceRegistryIntegrationTest extends AbstractIntegrationTest {
         Optional<ServiceEntry> found = repository.findById(entry.serviceId());
         assertThat(found).isPresent();
         assertThat(found.get().enabled()).isFalse();
+    }
+
+    @Test
+    void fullRegistrationRoundTrip() {
+        var req = new RegistrationRequest(
+                "acme", "inventory-service", "inventory", "GRADLE",
+                "service", null, null, "supply-chain"
+        );
+
+        var created = restTemplate.postForEntity("/registry/services", req, ServiceEntry.class);
+
+        assertThat(created.getStatusCode().value()).isEqualTo(201);
+        assertThat(created.getHeaders().getLocation()).isNotNull();
+
+        String serviceId = created.getBody().serviceId();
+        var fetched = restTemplate.getForEntity(
+                "/registry/services/" + serviceId, ServiceEntry.class);
+
+        assertThat(fetched.getStatusCode().value()).isEqualTo(200);
+        assertThat(fetched.getBody().orgId()).isEqualTo("acme");
+        assertThat(fetched.getBody().enabled()).isTrue();
     }
 }

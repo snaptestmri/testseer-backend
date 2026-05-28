@@ -7,12 +7,15 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-@SpringBootTest(properties = {
-    "spring.kafka.bootstrap-servers=localhost:9092",
-    "spring.cloud.gcp.pubsub.emulator-host=localhost:8085",
-    "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration," +
-        "com.google.cloud.spring.autoconfigure.pubsub.GcpPubSubAutoConfiguration"
-})
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = {
+        "spring.kafka.bootstrap-servers=localhost:9092",
+        "spring.cloud.gcp.pubsub.emulator-host=localhost:8085",
+        "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration," +
+            "com.google.cloud.spring.autoconfigure.pubsub.GcpPubSubAutoConfiguration"
+    }
+)
 @Testcontainers
 public abstract class AbstractIntegrationTest {
 
