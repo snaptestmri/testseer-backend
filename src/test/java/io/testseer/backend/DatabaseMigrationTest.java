@@ -63,4 +63,35 @@ class DatabaseMigrationTest extends AbstractIntegrationTest {
                 "snapshot_type", "evidence_source", "confidence", "indexed_at"
         );
     }
+
+    @Test
+    void peripheralFactsTableExists() {
+        List<String> columns = jdbcClient.sql("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'peripheral_facts'
+                """)
+                .query(String.class)
+                .list();
+
+        assertThat(columns).contains(
+                "id", "org_id", "service_id", "commit_sha",
+                "peripheral_type", "detection_tier", "detection_signals",
+                "prerequisite_text", "reason_code", "indexed_at"
+        );
+    }
+
+    @Test
+    void unsupportedConstructFactsTableExists() {
+        List<String> columns = jdbcClient.sql("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'unsupported_construct_facts'
+                """)
+                .query(String.class)
+                .list();
+
+        assertThat(columns).contains(
+                "id", "org_id", "service_id", "commit_sha",
+                "file_path", "reason_code", "detail", "indexed_at"
+        );
+    }
 }
