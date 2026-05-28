@@ -110,4 +110,46 @@ class DatabaseMigrationTest extends AbstractIntegrationTest {
                 "enqueued_at", "started_at", "completed_at", "error_detail"
         );
     }
+
+    @Test
+    void graphNodesTableExists() {
+        List<String> columns = jdbcClient.sql("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'graph_nodes'
+                """)
+                .query(String.class)
+                .list();
+
+        assertThat(columns).contains(
+                "id", "org_id", "repo", "service", "module_type", "node_type", "symbol_fqn"
+        );
+    }
+
+    @Test
+    void graphEdgesTableExists() {
+        List<String> columns = jdbcClient.sql("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'graph_edges'
+                """)
+                .query(String.class)
+                .list();
+
+        assertThat(columns).contains(
+                "id", "from_node", "to_node", "edge_type", "confidence", "evidence_source"
+        );
+    }
+
+    @Test
+    void graphIndexesExist() {
+        List<String> indexes = jdbcClient.sql("""
+                SELECT indexname FROM pg_indexes
+                WHERE tablename IN ('graph_nodes', 'graph_edges')
+                """)
+                .query(String.class)
+                .list();
+
+        assertThat(indexes).contains(
+                "idx_edges_from", "idx_edges_to", "idx_nodes_fqn", "idx_nodes_service"
+        );
+    }
 }
