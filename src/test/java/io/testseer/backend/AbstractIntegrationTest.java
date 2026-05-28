@@ -14,7 +14,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         "com.google.cloud.spring.autoconfigure.pubsub.GcpPubSubAutoConfiguration"
 })
 @Testcontainers
-abstract class AbstractIntegrationTest {
+public abstract class AbstractIntegrationTest {
 
     @Container
     @ServiceConnection

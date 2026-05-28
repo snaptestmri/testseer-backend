@@ -1,0 +1,8 @@
+spring:
+  cloud:
+    gcp:
+      pubsub:
+        emulator-host: localhost:8085
+  kafka:
+    consumer:
+      group-id: testseer-test-${random.uuid}

@@ -1,0 +1,42 @@
+spring:
+  application:
+    name: testseer-backend
+  datasource:
+    url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/testseer}
+    username: ${POSTGRES_USER:testseer}
+    password: ${POSTGRES_PASS:testseer}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/testseer}
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: io.testseer.backend
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+  cloud:
+    gcp:
+      pubsub:
+        project-id: ${GCP_PROJECT_ID:testseer-dev}
+
+testseer:
+  stale-threshold-minutes: 60
+
+logging:
+  level:
+    io.testseer: INFO
