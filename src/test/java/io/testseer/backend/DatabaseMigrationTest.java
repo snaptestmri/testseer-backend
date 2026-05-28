@@ -29,4 +29,22 @@ class DatabaseMigrationTest extends AbstractIntegrationTest {
                 "owner_team", "enabled", "metadata", "created_at", "updated_at"
         );
     }
+
+    @Test
+    void symbolFactsTableExists() {
+        List<String> columns = jdbcClient.sql("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'symbol_facts'
+                ORDER BY column_name
+                """)
+                .query(String.class)
+                .list();
+
+        assertThat(columns).contains(
+                "id", "org_id", "repo", "service_id", "commit_sha",
+                "file_path", "symbol_fqn", "symbol_kind", "snapshot_type",
+                "attributes", "evidence_source", "confidence",
+                "fact_schema_version", "indexed_at"
+        );
+    }
 }
