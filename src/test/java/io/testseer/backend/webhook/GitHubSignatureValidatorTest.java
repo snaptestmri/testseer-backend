@@ -7,7 +7,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class GitHubSignatureValidatorTest {
 
     private final GitHubSignatureValidator validator =
-            new GitHubSignatureValidator("test-secret");
+            GitHubSignatureValidator.forTesting("test-secret");
 
     @Test
     void validSignature_returnsTrue() {
@@ -19,7 +19,7 @@ class GitHubSignatureValidatorTest {
     @Test
     void wrongSecret_returnsFalse() {
         String payload = "{\"action\":\"opened\"}";
-        GitHubSignatureValidator other = new GitHubSignatureValidator("wrong-secret");
+        GitHubSignatureValidator other = GitHubSignatureValidator.forTesting("wrong-secret");
         String sig = other.computeSignature(payload);
         assertThat(validator.isValid(payload, sig)).isFalse();
     }

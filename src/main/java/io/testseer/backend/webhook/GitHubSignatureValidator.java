@@ -15,8 +15,20 @@ public class GitHubSignatureValidator {
 
     private final byte[] secretBytes;
 
-    public GitHubSignatureValidator(String secret) {
+    // Public constructor for Spring (with @Value annotation for DI)
+    public GitHubSignatureValidator(
+            @Value("${testseer.github.webhook-secret:changeme}") String secret) {
         this.secretBytes = secret.getBytes(StandardCharsets.UTF_8);
+    }
+
+    // Private constructor - actual implementation
+    private GitHubSignatureValidator(String secret, boolean unused) {
+        this.secretBytes = secret.getBytes(StandardCharsets.UTF_8);
+    }
+
+    // Static factory for tests
+    public static GitHubSignatureValidator forTesting(String secret) {
+        return new GitHubSignatureValidator(secret, true);
     }
 
     public boolean isValid(String payload, String signatureHeader) {
