@@ -34,7 +34,7 @@ public class JobDecomposer {
         for (String file : changedFiles) {
             for (ServiceEntry svc : registered) {
                 boolean matches = svc.sourceRoots().stream()
-                        .anyMatch(root -> file.startsWith(root + "/") || file.startsWith(root));
+                        .anyMatch(root -> file.startsWith(root + "/") || file.equals(root));
                 if (matches) {
                     serviceToFiles.computeIfAbsent(svc.serviceId(), k -> new ArrayList<>()).add(file);
                     break;
