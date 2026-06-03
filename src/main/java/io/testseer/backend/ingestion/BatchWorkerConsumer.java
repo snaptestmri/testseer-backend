@@ -33,6 +33,7 @@ public class BatchWorkerConsumer {
             ack.acknowledge();
         } catch (Exception ex) {
             log.error("Batch worker failed job={}: {}", job.jobId(), ex.getMessage(), ex);
+            // Do NOT acknowledge — Kafka will redeliver
         }
     }
 }
