@@ -113,4 +113,17 @@ class GraphProjectionIntegrationTest {
         assertThat(after.nodeIds()).doesNotContain("cls-order-svc");
         assertThat(after.nodeIds()).contains("cls-payment-svc");
     }
+
+    @Test
+    void graphTraversalMeetsSLO_under100ms() {
+        long start = System.currentTimeMillis();
+        graphService.serviceCallsServiceForward("svc-orders");
+        graphService.classDependsOnClassForward("cls-order-ctrl");
+        graphService.reverseReachability("type-order-dto");
+        graphService.crossServiceBoundary("ep-get-order");
+        long elapsed = System.currentTimeMillis() - start;
+
+        // 4 traversals must complete in < 100ms combined (budget per SLO is 100ms per query)
+        assertThat(elapsed).isLessThan(100);
+    }
 }
