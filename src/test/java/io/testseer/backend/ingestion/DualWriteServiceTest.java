@@ -36,11 +36,13 @@ class DualWriteServiceTest {
     @Autowired ServiceRegistryService registryService;
     @Autowired JdbcClient jdbcClient;
     @Autowired MongoTemplate mongoTemplate;
+    @Autowired AnalysisRunTracker runTracker;
 
     String serviceId;
 
     @BeforeEach
     void setup() {
+        jdbcClient.sql("DELETE FROM analysis_runs").update();
         jdbcClient.sql("DELETE FROM outbound_call_facts").update();
         jdbcClient.sql("DELETE FROM symbol_facts").update();
         jdbcClient.sql("DELETE FROM peripheral_facts").update();
@@ -92,5 +94,22 @@ class DualWriteServiceTest {
         long count = mongoTemplate.getCollection("parsed_models")
                 .countDocuments(new Document("serviceId", serviceId));
         assertThat(count).isEqualTo(1);
+    }
+
+    @Test
+    void markComplete_sets_COMPLETE_status_in_analysis_runs() {
+        jdbcClient.sql("""
+            INSERT INTO analysis_runs(job_id, org_id, service_id, commit_sha, job_type, status, attempt, enqueued_at)
+            VALUES ('j-track-001', 'acme', :svcId, 'abc', 'PR', 'QUEUED', 1, now())
+            """).param("svcId", serviceId).update();
+
+        runTracker.markRunning("j-track-001");
+        runTracker.markComplete("j-track-001");
+
+        String status = jdbcClient.sql(
+                "SELECT status FROM analysis_runs WHERE job_id = 'j-track-001'")
+                .query(String.class).single();
+
+        assertThat(status).isEqualTo("COMPLETE");
     }
 }
