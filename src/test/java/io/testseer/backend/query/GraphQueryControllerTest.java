@@ -19,7 +19,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest({FactQueryController.class, GraphQueryController.class})
-class FactQueryControllerTest {
+class GraphQueryControllerTest {
 
     @Autowired MockMvc mockMvc;
 

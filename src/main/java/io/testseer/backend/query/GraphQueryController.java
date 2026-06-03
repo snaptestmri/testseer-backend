@@ -13,16 +13,16 @@ public class GraphQueryController {
     private final GraphProjectionService graphService;
     private final FreshnessResolver freshnessResolver;
     private final CacheService cache;
-
-    @Value("${testseer.stale-threshold-minutes:60}")
-    private int staleThresholdMinutes;
+    private final int staleThresholdMinutes;
 
     public GraphQueryController(GraphProjectionService graphService,
                                 FreshnessResolver freshnessResolver,
-                                CacheService cache) {
+                                CacheService cache,
+                                @Value("${testseer.stale-threshold-minutes:60}") int staleThresholdMinutes) {
         this.graphService = graphService;
         this.freshnessResolver = freshnessResolver;
         this.cache = cache;
+        this.staleThresholdMinutes = staleThresholdMinutes;
     }
 
     @GetMapping("/reachability")
@@ -54,7 +54,7 @@ public class GraphQueryController {
             @RequestParam String nodeId,
             @RequestParam(defaultValue = "acme") String orgId,
             @RequestParam(defaultValue = "") String repo,
-            @RequestParam(defaultValue = "svc") String serviceId) {
+            @RequestParam String serviceId) {
 
         FreshnessStatus status = freshnessResolver.resolve(serviceId, staleThresholdMinutes);
         if (status == FreshnessStatus.NOT_INDEXED) {
@@ -72,7 +72,7 @@ public class GraphQueryController {
             @RequestParam String nodeId,
             @RequestParam(defaultValue = "acme") String orgId,
             @RequestParam(defaultValue = "") String repo,
-            @RequestParam(defaultValue = "svc") String serviceId) {
+            @RequestParam String serviceId) {
 
         FreshnessStatus status = freshnessResolver.resolve(serviceId, staleThresholdMinutes);
         if (status == FreshnessStatus.NOT_INDEXED) {
@@ -85,6 +85,8 @@ public class GraphQueryController {
         return ResponseEntity.ok(ResponseEnvelope.of(null, null, status, result));
     }
 
+    // Shared types are library/cross-service nodes that don't have their own analysis runs.
+    // Always returns CURRENT — freshness is managed at the consuming service level.
     @GetMapping("/shared-type")
     public ResponseEntity<ResponseEnvelope<ReachabilityResult>> sharedType(
             @RequestParam String symbolFqn) {
@@ -92,6 +94,8 @@ public class GraphQueryController {
         return ResponseEntity.ok(ResponseEnvelope.of(null, null, FreshnessStatus.CURRENT, result));
     }
 
+    // Shared types are library/cross-service nodes that don't have their own analysis runs.
+    // Always returns CURRENT — freshness is managed at the consuming service level.
     @GetMapping("/type-fanout")
     public ResponseEntity<ResponseEnvelope<ReachabilityResult>> typeFanOut(
             @RequestParam String symbolFqn) {

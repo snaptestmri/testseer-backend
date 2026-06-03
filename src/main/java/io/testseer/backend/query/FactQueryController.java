@@ -15,16 +15,16 @@ public class FactQueryController {
     private final JdbcClient db;
     private final FreshnessResolver freshnessResolver;
     private final CacheService cache;
-
-    @Value("${testseer.stale-threshold-minutes:60}")
-    private int staleThresholdMinutes;
+    private final int staleThresholdMinutes;
 
     public FactQueryController(JdbcClient db,
                                FreshnessResolver freshnessResolver,
-                               CacheService cache) {
+                               CacheService cache,
+                               @Value("${testseer.stale-threshold-minutes:60}") int staleThresholdMinutes) {
         this.db = db;
         this.freshnessResolver = freshnessResolver;
         this.cache = cache;
+        this.staleThresholdMinutes = staleThresholdMinutes;
     }
 
     @GetMapping("/class")
@@ -41,13 +41,12 @@ public class FactQueryController {
 
         @SuppressWarnings("unchecked")
         List<SymbolFactView> facts = cache.get(orgId, repo, serviceId,
-                "facts:class", symbolFqn.hashCode() + "",
+                "facts:class", symbolFqn,
                 () -> querySymbolFacts(serviceId, symbolFqn),
                 (Class<List<SymbolFactView>>) (Class<?>) List.class);
 
-        Instant indexedAt = latestIndexedAt(serviceId);
-        String commitSha  = latestCommitSha(serviceId);
-        var envelope = ResponseEnvelope.of(indexedAt, commitSha, status, facts);
+        RunMeta run = latestRun(serviceId);
+        var envelope = ResponseEnvelope.of(run.indexedAt(), run.commitSha(), status, facts);
 
         int httpStatus = status == FreshnessStatus.INDEXING ? 202 : 200;
         return ResponseEntity.status(httpStatus).body(envelope);
@@ -73,28 +72,22 @@ public class FactQueryController {
                 .list();
     }
 
-    private Instant latestIndexedAt(String serviceId) {
-        return db.sql("""
-                SELECT completed_at FROM analysis_runs
-                WHERE service_id = :id AND status = 'COMPLETE'
-                ORDER BY completed_at DESC LIMIT 1
-                """)
-                .param("id", serviceId)
-                .query(Instant.class)
-                .optional()
-                .orElse(null);
-    }
+    private record RunMeta(Instant indexedAt, String commitSha) {}
 
-    private String latestCommitSha(String serviceId) {
+    private RunMeta latestRun(String serviceId) {
         return db.sql("""
-                SELECT commit_sha FROM analysis_runs
+                SELECT completed_at, commit_sha FROM analysis_runs
                 WHERE service_id = :id AND status = 'COMPLETE'
                 ORDER BY completed_at DESC LIMIT 1
                 """)
                 .param("id", serviceId)
-                .query(String.class)
+                .query((rs, row) -> new RunMeta(
+                        rs.getTimestamp("completed_at") != null
+                                ? rs.getTimestamp("completed_at").toInstant() : null,
+                        rs.getString("commit_sha")
+                ))
                 .optional()
-                .orElse(null);
+                .orElse(new RunMeta(null, null));
     }
 
     public record SymbolFactView(
