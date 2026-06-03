@@ -1,7 +1,6 @@
 package io.testseer.backend.ingestion;
 
 import java.util.List;
-import java.util.Map;
 
 public record ParsedModel(
         String filePath,
