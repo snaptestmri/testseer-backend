@@ -34,6 +34,7 @@ class GraphProjectionIntegrationTest {
     @Autowired GraphEdgeRepository edgeRepo;
     @Autowired ServiceRegistryService svcRegistry;
     @Autowired JdbcClient db;
+    @Autowired IncrementalEdgeUpdater edgeUpdater;
 
     @BeforeEach
     void setup() {
@@ -89,5 +90,27 @@ class GraphProjectionIntegrationTest {
     void typeUsageFanOut_findsAllConsumingServices() {
         ReachabilityResult result = graphService.typeUsageFanOut("com.example.shared.OrderDto");
         assertThat(result.size()).isEqualTo(2);
+    }
+
+    @Test
+    void incrementalUpdate_replacesEdgesForChangedNode() {
+        // Before: cls-order-ctrl -> cls-order-svc (DEPENDS_ON)
+        ReachabilityResult before = graphService.classDependsOnClassForward("cls-order-ctrl");
+        assertThat(before.nodeIds()).contains("cls-order-svc");
+
+        // Add a new class node for the replacement dependency
+        nodeRepo.upsert(GraphNode.clazz("cls-payment-svc", GraphFixture.ORG, GraphFixture.REPO,
+                "orders", "com.example.PaymentService"));
+
+        // Update: cls-order-ctrl now depends on cls-payment-svc instead
+        edgeUpdater.replaceEdges(
+                "cls-order-ctrl",
+                "DEPENDS_ON",
+                List.of(GraphEdge.dependsOn("cls-order-ctrl", "cls-payment-svc"))
+        );
+
+        ReachabilityResult after = graphService.classDependsOnClassForward("cls-order-ctrl");
+        assertThat(after.nodeIds()).doesNotContain("cls-order-svc");
+        assertThat(after.nodeIds()).contains("cls-payment-svc");
     }
 }
