@@ -19,13 +19,14 @@ public class GitHubSourceFetcher {
 
     public GitHubSourceFetcher(
             @Value("${testseer.github.token:}") String githubToken) {
-        this.restClient = RestClient.builder()
+        RestClient.Builder builder = RestClient.builder()
                 .baseUrl("https://api.github.com")
                 .defaultHeader("Accept", "application/vnd.github+json")
-                .defaultHeader("X-GitHub-Api-Version", "2022-11-28")
-                .defaultHeader("Authorization",
-                        githubToken.isBlank() ? "" : "Bearer " + githubToken)
-                .build();
+                .defaultHeader("X-GitHub-Api-Version", "2022-11-28");
+        if (!githubToken.isBlank()) {
+            builder.defaultHeader("Authorization", "Bearer " + githubToken);
+        }
+        this.restClient = builder.build();
     }
 
     // package-visible for testing
