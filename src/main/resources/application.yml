@@ -36,6 +36,8 @@ spring:
 
 testseer:
   stale-threshold-minutes: 60
+  pubsub:
+    enabled: ${PUBSUB_ENABLED:false}
 
 logging:
   level:
