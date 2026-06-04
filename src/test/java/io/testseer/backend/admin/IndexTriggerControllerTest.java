@@ -37,13 +37,11 @@ class IndexTriggerControllerTest {
     }
 
     @Test
-    void trigger_withEmptyBody_returns202() throws Exception {
+    void trigger_withNoBody_returns202() throws Exception {
         when(triggerService.trigger(eq("svc-001"), any()))
                 .thenReturn(new IndexTriggerResponse("job-456", "svc-001", "headsha", 10));
 
-        mockMvc.perform(post("/admin/index/svc-001")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
+        mockMvc.perform(post("/admin/index/svc-001"))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.jobId").value("job-456"));
     }
