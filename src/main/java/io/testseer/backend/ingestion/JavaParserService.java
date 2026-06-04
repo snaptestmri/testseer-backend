@@ -32,6 +32,10 @@ public class JavaParserService {
             "patchForEntity", "PATCH"
     );
 
+    private static final List<String> CLIENTS = List.of(
+            "RestClient", "WebClient", "RestTemplate", "FeignClient"
+    );
+
     private final JavaParser parser;
 
     public JavaParserService() {
@@ -183,7 +187,6 @@ public class JavaParserService {
 
         // Field-level fallback: always emit presence signal for each HTTP client field.
         // Captures cases where the URI is dynamic (variable, not a string literal).
-        List<String> CLIENTS = List.of("RestClient", "WebClient", "RestTemplate", "FeignClient");
         cls.getFields().forEach(field -> {
             String type = field.getElementType().asString();
             if (CLIENTS.stream().anyMatch(type::contains)) {
