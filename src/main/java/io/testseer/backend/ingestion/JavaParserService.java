@@ -6,10 +6,13 @@ import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
+import com.github.javaparser.ast.expr.Expression;
+import com.github.javaparser.ast.expr.MethodCallExpr;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Component
@@ -34,9 +37,18 @@ public class JavaParserService {
         }
 
         CompilationUnit cu = result.getResult().get();
+        // getPrimaryType() requires a file-backed parse to match on filename;
+        // when parsing from a raw string it returns empty, so fall back to the
+        // first top-level class declared in the compilation unit.
         Optional<ClassOrInterfaceDeclaration> primaryClass = cu.getPrimaryType()
                 .filter(t -> t instanceof ClassOrInterfaceDeclaration)
                 .map(t -> (ClassOrInterfaceDeclaration) t);
+        if (primaryClass.isEmpty()) {
+            primaryClass = cu.getTypes().stream()
+                    .filter(t -> t instanceof ClassOrInterfaceDeclaration)
+                    .map(t -> (ClassOrInterfaceDeclaration) t)
+                    .findFirst();
+        }
 
         if (primaryClass.isEmpty()) {
             return new ParsedModel(filePath, null, List.of(), List.of(), List.of(),
@@ -106,8 +118,59 @@ public class JavaParserService {
     private List<ParsedModel.OutboundCallDef> extractOutboundCalls(
             ClassOrInterfaceDeclaration cls) {
         List<ParsedModel.OutboundCallDef> result = new ArrayList<>();
-        var CLIENTS = List.of("RestClient", "WebClient", "RestTemplate", "FeignClient");
 
+        // Method-body traversal: RestClient / WebClient
+        // Pattern: <scope>.get().uri("path"), <scope>.post().uri("path"), etc.
+        Map<String, String> HTTP_VERBS = Map.of(
+                "get", "GET", "post", "POST", "put", "PUT",
+                "delete", "DELETE", "patch", "PATCH"
+        );
+
+        // RestTemplate explicit method names
+        Map<String, String> TEMPLATE_METHODS = Map.of(
+                "getForEntity",  "GET",
+                "getForObject",  "GET",
+                "postForEntity", "POST",
+                "postForObject", "POST",
+                "delete",        "DELETE",
+                "patchForEntity","PATCH"
+        );
+
+        cls.getMethods().forEach(method -> {
+            method.findAll(MethodCallExpr.class).forEach(call -> {
+
+                // RestClient / WebClient: look for .uri(...) chained on .get()/.post()/etc.
+                if ("uri".equals(call.getNameAsString())
+                        && call.getScope().isPresent()
+                        && !call.getArguments().isEmpty()) {
+                    Expression scope = call.getScope().get();
+                    if (scope instanceof MethodCallExpr verbCall) {
+                        String httpMethod = HTTP_VERBS.get(verbCall.getNameAsString());
+                        if (httpMethod != null) {
+                            String rawArg = call.getArgument(0).toString().replace("\"", "");
+                            result.add(new ParsedModel.OutboundCallDef(
+                                    "RestClient", httpMethod, rawArg,
+                                    cls.getNameAsString() + "#" + method.getNameAsString()
+                            ));
+                        }
+                    }
+                }
+
+                // RestTemplate: getForEntity("/path", ...), postForEntity("/path", ...), etc.
+                String tmVerb = TEMPLATE_METHODS.get(call.getNameAsString());
+                if (tmVerb != null && !call.getArguments().isEmpty()) {
+                    String rawArg = call.getArgument(0).toString().replace("\"", "");
+                    result.add(new ParsedModel.OutboundCallDef(
+                            "RestTemplate", tmVerb, rawArg,
+                            cls.getNameAsString() + "#" + method.getNameAsString()
+                    ));
+                }
+            });
+        });
+
+        // Field-level fallback: always emit presence signal for each HTTP client field.
+        // Captures cases where the URI is dynamic (variable, not a string literal).
+        List<String> CLIENTS = List.of("RestClient", "WebClient", "RestTemplate", "FeignClient");
         cls.getFields().forEach(field -> {
             String type = field.getElementType().asString();
             if (CLIENTS.stream().anyMatch(type::contains)) {
@@ -116,6 +179,7 @@ public class JavaParserService {
                 ));
             }
         });
+
         return result;
     }
 
