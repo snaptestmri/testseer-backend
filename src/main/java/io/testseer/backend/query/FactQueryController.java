@@ -94,4 +94,65 @@ public class FactQueryController {
             String symbolFqn, String symbolKind, String attributes,
             String evidenceSource, double confidence, Instant indexedAt
     ) {}
+
+    public record OutboundCallView(
+            String sourceSymbol,
+            String httpMethod,
+            String path,
+            String evidenceSource,
+            double confidence,
+            java.time.Instant indexedAt
+    ) {}
+
+    @GetMapping("/outbound")
+    public ResponseEntity<ResponseEnvelope<List<OutboundCallView>>> getOutboundFacts(
+            @RequestParam String serviceId,
+            @RequestParam(defaultValue = "acme") String orgId,
+            @RequestParam(defaultValue = "") String repo,
+            @RequestParam(required = false) String sourceSymbol) {
+
+        FreshnessStatus status = freshnessResolver.resolve(serviceId, staleThresholdMinutes);
+        if (status == FreshnessStatus.NOT_INDEXED) {
+            return ResponseEntity.status(404).body(ResponseEnvelope.notIndexed());
+        }
+        if (status == FreshnessStatus.INDEXING) {
+            return ResponseEntity.status(202).body(ResponseEnvelope.indexing(null));
+        }
+
+        String cacheKey = sourceSymbol != null ? sourceSymbol : "__all__";
+
+        @SuppressWarnings("unchecked")
+        List<OutboundCallView> facts = cache.get(orgId, repo, serviceId,
+                "facts:outbound", cacheKey,
+                () -> queryOutboundFacts(serviceId, sourceSymbol),
+                (Class<List<OutboundCallView>>) (Class<?>) List.class);
+
+        RunMeta run = latestRun(serviceId);
+        var envelope = ResponseEnvelope.of(run.indexedAt(), run.commitSha(), status, facts);
+        return ResponseEntity.ok(envelope);
+    }
+
+    private List<OutboundCallView> queryOutboundFacts(String serviceId, String sourceSymbol) {
+        String baseSql = """
+                SELECT source_symbol, http_method, path, evidence_source, confidence, indexed_at
+                FROM outbound_call_facts
+                WHERE service_id = :svcId
+                """;
+        String orderSql = "ORDER BY source_symbol, http_method NULLS LAST, path NULLS LAST";
+
+        var spec = db.sql(sourceSymbol != null
+                        ? baseSql + "  AND source_symbol = :srcSym\n" + orderSql
+                        : baseSql + orderSql)
+                .param("svcId", serviceId);
+        if (sourceSymbol != null) spec = spec.param("srcSym", sourceSymbol);
+
+        return spec.query((rs, row) -> new OutboundCallView(
+                rs.getString("source_symbol"),
+                rs.getString("http_method"),
+                rs.getString("path"),
+                rs.getString("evidence_source"),
+                rs.getDouble("confidence"),
+                rs.getTimestamp("indexed_at").toInstant()
+        )).list();
+    }
 }
