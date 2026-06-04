@@ -3,6 +3,7 @@ package io.testseer.backend.registry;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -41,6 +42,11 @@ public class ServiceRegistryService {
     public ServiceEntry getById(String serviceId) {
         return repository.findById(serviceId)
                 .orElseThrow(() -> new ServiceNotFoundException(serviceId));
+    }
+
+    public Optional<ServiceEntry> getByOrgAndName(String orgId, String serviceName) {
+        // repo = serviceName by convention (one service per repo)
+        return repository.findByOrgRepoService(orgId, serviceName, serviceName);
     }
 
     public List<ServiceEntry> listAll() {
