@@ -62,7 +62,8 @@ public class WorkerPipeline {
                         job.jobId(), unsupported.size(), job.serviceId());
             }
 
-            String snapshotType = "NIGHTLY".equals(job.jobType()) ? "BASELINE" : "DELTA";
+            String snapshotType = "NIGHTLY".equals(job.jobType()) || "MANUAL".equals(job.jobType())
+                    ? "BASELINE" : "DELTA";
 
             FactBatch batch = new FactBatch(
                     job.jobId(), job.orgId(), job.repo(), job.serviceId(),
