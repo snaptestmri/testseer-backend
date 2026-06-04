@@ -18,6 +18,20 @@ import java.util.Optional;
 @Component
 public class JavaParserService {
 
+    private static final Map<String, String> HTTP_VERBS = Map.of(
+            "get", "GET", "post", "POST", "put", "PUT",
+            "delete", "DELETE", "patch", "PATCH"
+    );
+
+    private static final Map<String, String> TEMPLATE_METHODS = Map.of(
+            "getForEntity",   "GET",
+            "getForObject",   "GET",
+            "postForEntity",  "POST",
+            "postForObject",  "POST",
+            "delete",         "DELETE",
+            "patchForEntity", "PATCH"
+    );
+
     private final JavaParser parser;
 
     public JavaParserService() {
@@ -81,6 +95,20 @@ public class JavaParserService {
         List<ParsedModel.EndpointDef> endpoints = extractEndpoints(cls);
         List<ParsedModel.OutboundCallDef> outboundCalls = extractOutboundCalls(cls);
 
+        // FeignClient interfaces declare outbound calls via their own mapping annotations.
+        // Reuse extractEndpoints() — the annotation structure is identical to controllers.
+        if (annotations.contains("FeignClient")) {
+            List<ParsedModel.OutboundCallDef> feignCalls = endpoints.stream()
+                    .map(ep -> new ParsedModel.OutboundCallDef(
+                            "FeignClient", ep.httpMethod(), ep.path(),
+                            classFqn + "#" + ep.methodName()
+                    ))
+                    .toList();
+            List<ParsedModel.OutboundCallDef> merged = new ArrayList<>(outboundCalls);
+            merged.addAll(feignCalls);
+            outboundCalls = merged;
+        }
+
         return new ParsedModel(
                 filePath, classFqn, annotations, constructorParams,
                 fieldInjections, endpoints, outboundCalls, false, null
@@ -121,21 +149,6 @@ public class JavaParserService {
 
         // Method-body traversal: RestClient / WebClient
         // Pattern: <scope>.get().uri("path"), <scope>.post().uri("path"), etc.
-        Map<String, String> HTTP_VERBS = Map.of(
-                "get", "GET", "post", "POST", "put", "PUT",
-                "delete", "DELETE", "patch", "PATCH"
-        );
-
-        // RestTemplate explicit method names
-        Map<String, String> TEMPLATE_METHODS = Map.of(
-                "getForEntity",  "GET",
-                "getForObject",  "GET",
-                "postForEntity", "POST",
-                "postForObject", "POST",
-                "delete",        "DELETE",
-                "patchForEntity","PATCH"
-        );
-
         cls.getMethods().forEach(method -> {
             method.findAll(MethodCallExpr.class).forEach(call -> {
 

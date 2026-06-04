@@ -106,6 +106,33 @@ class JavaParserOutboundTest {
     }
 
     @Test
+    void feignClient_extractsMethodAnnotationsAsOutboundCalls() {
+        String source = """
+                package com.example;
+                import org.springframework.cloud.openfeign.FeignClient;
+                import org.springframework.web.bind.annotation.GetMapping;
+                import org.springframework.web.bind.annotation.PostMapping;
+                @FeignClient(name = "payment-service")
+                public interface PaymentServiceClient {
+                    @GetMapping("/payments/{id}")
+                    String getPayment(String id);
+                    @PostMapping("/payments")
+                    String createPayment(String body);
+                }
+                """;
+
+        ParsedModel model = parser.parse("PaymentServiceClient.java", source);
+
+        List<ParsedModel.OutboundCallDef> calls = model.outboundCalls().stream()
+                .filter(c -> c.httpMethod() != null)
+                .toList();
+        assertThat(calls).hasSize(2);
+        assertThat(calls).anyMatch(c -> "GET".equals(c.httpMethod()) && "/payments/{id}".equals(c.path()));
+        assertThat(calls).anyMatch(c -> "POST".equals(c.httpMethod()) && "/payments".equals(c.path()));
+        assertThat(calls).allMatch(c -> "FeignClient".equals(c.clientType()));
+    }
+
+    @Test
     void noHttpCalls_returnsFieldLevelFallback() {
         String source = """
                 package com.example;
