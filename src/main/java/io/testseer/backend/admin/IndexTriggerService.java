@@ -58,7 +58,6 @@ public class IndexTriggerService {
                 1
         );
 
-        runTracker.markQueued(job);
         publisher.publishBatchJob(job);
 
         return new IndexTriggerResponse(job.jobId(), serviceId, commitSha, javaPaths.size());
