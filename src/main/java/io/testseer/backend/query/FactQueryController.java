@@ -1,5 +1,10 @@
 package io.testseer.backend.query;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -8,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.Instant;
 import java.util.List;
 
+@Tag(name = "Query — Facts", description = "Retrieve indexed facts about classes and outbound HTTP calls")
 @RestController
 @RequestMapping("/v1/facts")
 public class FactQueryController {
@@ -27,12 +33,22 @@ public class FactQueryController {
         this.staleThresholdMinutes = staleThresholdMinutes;
     }
 
+    @Operation(summary = "Get symbol facts for a class",
+               description = """
+                   Returns all indexed symbol facts for the given class FQN within a service. \
+                   Results are Redis-cached. Returns 404 if the service has never been indexed, \
+                   202 if indexing is currently in progress.""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Facts returned"),
+        @ApiResponse(responseCode = "202", description = "Indexing in progress — stale data may be returned"),
+        @ApiResponse(responseCode = "404", description = "Service not indexed")
+    })
     @GetMapping("/class")
     public ResponseEntity<ResponseEnvelope<List<SymbolFactView>>> getClassFacts(
-            @RequestParam String serviceId,
-            @RequestParam String symbolFqn,
-            @RequestParam(defaultValue = "acme") String orgId,
-            @RequestParam(defaultValue = "") String repo) {
+            @Parameter(description = "Service identifier", required = true) @RequestParam String serviceId,
+            @Parameter(description = "Fully-qualified class name, e.g. com.example.OrdersController", required = true) @RequestParam String symbolFqn,
+            @Parameter(description = "Organisation ID") @RequestParam(defaultValue = "acme") String orgId,
+            @Parameter(description = "Repository name") @RequestParam(defaultValue = "") String repo) {
 
         FreshnessStatus status = freshnessResolver.resolve(serviceId, staleThresholdMinutes);
         if (status == FreshnessStatus.NOT_INDEXED) {
@@ -104,12 +120,24 @@ public class FactQueryController {
             Instant indexedAt
     ) {}
 
+    @Operation(summary = "Get outbound HTTP call facts for a service",
+               description = """
+                   Returns all detected outbound HTTP calls made by the service. \
+                   Includes RestClient/WebClient chain calls, RestTemplate explicit methods, \
+                   and FeignClient interface declarations. \
+                   `httpMethod` and `path` are null when only client field presence was detected \
+                   (e.g. a dynamic URI in a variable). Optionally filtered to a single caller class.""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Outbound call facts returned"),
+        @ApiResponse(responseCode = "202", description = "Indexing in progress"),
+        @ApiResponse(responseCode = "404", description = "Service not indexed")
+    })
     @GetMapping("/outbound")
     public ResponseEntity<ResponseEnvelope<List<OutboundCallView>>> getOutboundFacts(
-            @RequestParam String serviceId,
-            @RequestParam(defaultValue = "acme") String orgId,
-            @RequestParam(defaultValue = "") String repo,
-            @RequestParam(required = false) String sourceSymbol) {
+            @Parameter(description = "Service identifier", required = true) @RequestParam String serviceId,
+            @Parameter(description = "Organisation ID") @RequestParam(defaultValue = "acme") String orgId,
+            @Parameter(description = "Repository name") @RequestParam(defaultValue = "") String repo,
+            @Parameter(description = "Filter by caller class FQN (optional)") @RequestParam(required = false) String sourceSymbol) {
 
         FreshnessStatus status = freshnessResolver.resolve(serviceId, staleThresholdMinutes);
         if (status == FreshnessStatus.NOT_INDEXED) {

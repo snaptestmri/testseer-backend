@@ -1,5 +1,9 @@
 package io.testseer.backend.query;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -8,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.Instant;
 import java.util.Map;
 
+@Tag(name = "Query — Status", description = "Service indexing freshness and metadata")
 @RestController
 @RequestMapping("/v1/status")
 public class StatusController {
@@ -23,9 +28,15 @@ public class StatusController {
         this.staleThresholdMinutes = staleThresholdMinutes;
     }
 
+    @Operation(summary = "Get indexing status for a service",
+               description = """
+                   Returns the freshness status (CURRENT, STALE, INDEXING, NOT_INDEXED) \
+                   for the given service, along with the last indexed commit SHA and timestamp. \
+                   This endpoint is never cached — it always reads live from analysis_runs.""")
+    @ApiResponse(responseCode = "200", description = "Status returned (check freshnessStatus field)")
     @GetMapping("/{serviceId}")
     public ResponseEntity<ResponseEnvelope<Map<String, Object>>> status(
-            @PathVariable String serviceId) {
+            @Parameter(description = "Unique service identifier") @PathVariable String serviceId) {
 
         FreshnessStatus freshness = freshnessResolver.resolve(serviceId, staleThresholdMinutes);
 

@@ -2,6 +2,11 @@ package io.testseer.backend.webhook;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -10,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.ArrayList;
 import java.util.List;
 
+@Tag(name = "Webhook", description = "GitHub webhook receiver for push and pull_request events")
 @RestController
 @RequestMapping("/webhook/github")
 public class WebhookController {
@@ -31,9 +37,21 @@ public class WebhookController {
         this.mapper = mapper;
     }
 
+    @Operation(summary = "Receive GitHub webhook",
+               description = """
+                   Accepts GitHub `push` and `pull_request` webhook events. \
+                   Validates the HMAC-SHA256 signature, extracts changed Java files, \
+                   and queues analysis jobs to Kafka. Returns 202 Accepted on success.""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "202", description = "Webhook accepted and queued"),
+        @ApiResponse(responseCode = "200", description = "Webhook received but ignored (unsupported event or action)"),
+        @ApiResponse(responseCode = "401", description = "Invalid HMAC signature")
+    })
     @PostMapping
     public ResponseEntity<Void> handleWebhook(
+            @Parameter(description = "GitHub event type (push, pull_request)", required = true)
             @RequestHeader("X-GitHub-Event") String event,
+            @Parameter(description = "HMAC-SHA256 signature for payload verification")
             @RequestHeader(value = "X-Hub-Signature-256", required = false) String signature,
             @RequestBody String payload) {
 
