@@ -101,7 +101,7 @@ public class FactQueryController {
             String path,
             String evidenceSource,
             double confidence,
-            java.time.Instant indexedAt
+            Instant indexedAt
     ) {}
 
     @GetMapping("/outbound")
@@ -115,9 +115,6 @@ public class FactQueryController {
         if (status == FreshnessStatus.NOT_INDEXED) {
             return ResponseEntity.status(404).body(ResponseEnvelope.notIndexed());
         }
-        if (status == FreshnessStatus.INDEXING) {
-            return ResponseEntity.status(202).body(ResponseEnvelope.indexing(null));
-        }
 
         String cacheKey = sourceSymbol != null ? sourceSymbol : "__all__";
 
@@ -129,7 +126,8 @@ public class FactQueryController {
 
         RunMeta run = latestRun(serviceId);
         var envelope = ResponseEnvelope.of(run.indexedAt(), run.commitSha(), status, facts);
-        return ResponseEntity.ok(envelope);
+        int httpStatus = status == FreshnessStatus.INDEXING ? 202 : 200;
+        return ResponseEntity.status(httpStatus).body(envelope);
     }
 
     private List<OutboundCallView> queryOutboundFacts(String serviceId, String sourceSymbol) {
@@ -152,7 +150,7 @@ public class FactQueryController {
                 rs.getString("path"),
                 rs.getString("evidence_source"),
                 rs.getDouble("confidence"),
-                rs.getTimestamp("indexed_at").toInstant()
+                rs.getTimestamp("indexed_at") != null ? rs.getTimestamp("indexed_at").toInstant() : null
         )).list();
     }
 }
