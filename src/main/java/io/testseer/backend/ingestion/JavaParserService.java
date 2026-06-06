@@ -4,6 +4,7 @@ import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.EnumDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.Expression;
@@ -69,7 +70,28 @@ public class JavaParserService {
                     .findFirst();
         }
 
+        // Enum detection — handled separately from class/interface
         if (primaryClass.isEmpty()) {
+            Optional<EnumDeclaration> enumDecl = cu.getTypes().stream()
+                    .filter(t -> t instanceof EnumDeclaration)
+                    .map(t -> (EnumDeclaration) t)
+                    .findFirst();
+            if (enumDecl.isPresent()) {
+                EnumDeclaration en = enumDecl.get();
+                String enumFqn = cu.getPackageDeclaration()
+                        .map(p -> p.getNameAsString() + "." + en.getNameAsString())
+                        .orElse(en.getNameAsString());
+                List<String> enumAnnotations = en.getAnnotations().stream()
+                        .map(AnnotationExpr::getNameAsString).toList();
+                List<String> enumValues = en.getEntries().stream()
+                        .map(e -> e.getNameAsString()).toList();
+                return new ParsedModel(
+                        filePath, enumFqn, enumAnnotations, List.of(), List.of(),
+                        List.of(), List.of(), false, null,
+                        extractJavadoc(en), List.of(), enumValues
+                );
+            }
+            // Not a class, interface, or enum
             return new ParsedModel(filePath, null, List.of(), List.of(), List.of(),
                     List.of(), List.of(), false, null,
                     null, List.of(), List.of());
@@ -115,11 +137,47 @@ public class JavaParserService {
             outboundCalls = merged;
         }
 
+        String classJavadoc = extractJavadoc(cls);
+        List<ParsedModel.MethodDef> publicMethods = extractPublicMethods(cls);
+
         return new ParsedModel(
                 filePath, classFqn, annotations, constructorParams,
                 fieldInjections, endpoints, outboundCalls, false, null,
-                null, List.of(), List.of()
+                classJavadoc, publicMethods, List.of()
         );
+    }
+
+    private static boolean isGetterOrSetter(MethodDeclaration method) {
+        String name = method.getNameAsString();
+        return (name.startsWith("get") || name.startsWith("set") || name.startsWith("is"))
+                && method.getParameters().size() <= 1;
+    }
+
+    private static String extractJavadoc(
+            com.github.javaparser.ast.nodeTypes.NodeWithJavadoc<?> node) {
+        return node.getJavadocComment()
+                .map(jd -> jd.parse().getDescription().toText().trim())
+                .filter(s -> !s.isBlank())
+                .orElse(null);
+    }
+
+    private static List<ParsedModel.MethodDef> extractPublicMethods(
+            ClassOrInterfaceDeclaration cls) {
+        return cls.getMethods().stream()
+                .filter(MethodDeclaration::isPublic)
+                .filter(m -> !isGetterOrSetter(m))
+                .map(m -> new ParsedModel.MethodDef(
+                        m.getNameAsString(),
+                        extractJavadoc(m),
+                        m.getType().asString(),
+                        m.getParameters().stream()
+                                .map(p -> p.getType().asString())
+                                .toList(),
+                        m.getThrownExceptions().stream()
+                                .map(e -> e.asString())
+                                .toList()
+                ))
+                .toList();
     }
 
     private List<ParsedModel.EndpointDef> extractEndpoints(ClassOrInterfaceDeclaration cls) {
