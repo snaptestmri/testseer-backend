@@ -10,6 +10,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -51,7 +52,7 @@ class ServiceDescriptionControllerTest {
 
         // Invoke directly to verify the disabled-optional path
         var response = ctrl.getDescription("svc-001");
-        assert response.getStatusCode().value() == 503;
+        assertThat(response.getStatusCode().value()).isEqualTo(503);
     }
 
     @Test
@@ -82,6 +83,6 @@ class ServiceDescriptionControllerTest {
                 new ServiceDescriptionController(Optional.empty());
 
         var response = ctrl.generateDescription("svc-001");
-        assert response.getStatusCode().value() == 503;
+        assertThat(response.getStatusCode().value()).isEqualTo(503);
     }
 }

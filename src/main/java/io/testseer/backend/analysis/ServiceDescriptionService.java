@@ -155,7 +155,7 @@ public class ServiceDescriptionService {
                     .orElse("Could not generate description.");
         } catch (Exception ex) {
             log.error("Failed to generate description for {}: {}", serviceId, ex.getMessage());
-            return "Description generation failed: " + ex.getMessage();
+            throw new RuntimeException("Description generation failed for " + serviceId, ex);
         }
     }
 }
