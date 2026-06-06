@@ -80,4 +80,55 @@ class FactExtractorTest {
         assertThat(facts.get(0).filePath()).isEqualTo("Bad.java");
         assertThat(facts.get(0).reasonCode()).isEqualTo("PARSE_ERROR");
     }
+
+    @Test
+    void extractMethodFacts_emitsMethodSymbols() {
+        ParsedModel model = new ParsedModel(
+                "OrderService.java", "io.orders.OrderService",
+                List.of(), List.of(), List.of(), List.of(), List.of(), false, null,
+                "Manages orders",
+                List.of(new ParsedModel.MethodDef(
+                        "createOrder", "Creates an order",
+                        "Order", List.of("String", "Money"),
+                        List.of("PaymentException")
+                )),
+                List.of()
+        );
+
+        List<FactBatch.SymbolFact> facts = extractor.extractMethodFacts(model);
+
+        assertThat(facts).hasSize(1);
+        assertThat(facts.get(0).symbolFqn()).isEqualTo("io.orders.OrderService#createOrder");
+        assertThat(facts.get(0).symbolKind()).isEqualTo("METHOD");
+        assertThat(facts.get(0).attributes()).contains("PaymentException");
+    }
+
+    @Test
+    void extractEnumFacts_emitsEnumSymbol() {
+        ParsedModel model = new ParsedModel(
+                "OrderStatus.java", "io.orders.OrderStatus",
+                List.of(), List.of(), List.of(), List.of(), List.of(), false, null,
+                "Order lifecycle states",
+                List.of(),
+                List.of("PENDING", "CONFIRMED", "CANCELLED")
+        );
+
+        List<FactBatch.SymbolFact> facts = extractor.extractEnumFacts(model);
+
+        assertThat(facts).hasSize(1);
+        assertThat(facts.get(0).symbolKind()).isEqualTo("ENUM");
+        assertThat(facts.get(0).symbolFqn()).isEqualTo("io.orders.OrderStatus");
+        assertThat(facts.get(0).attributes()).contains("PENDING");
+    }
+
+    @Test
+    void extractMethodFacts_returnsEmpty_whenNoPublicMethods() {
+        ParsedModel model = new ParsedModel(
+                "Foo.java", "io.Foo", List.of(), List.of(), List.of(),
+                List.of(), List.of(), false, null,
+                null, List.of(), List.of()
+        );
+        assertThat(extractor.extractMethodFacts(model)).isEmpty();
+        assertThat(extractor.extractEnumFacts(model)).isEmpty();
+    }
 }

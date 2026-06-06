@@ -1,5 +1,6 @@
 package io.testseer.backend.admin;
 
+import io.testseer.backend.graph.GraphFactProjector;
 import io.testseer.backend.ingestion.*;
 import io.testseer.backend.registry.*;
 import io.testseer.backend.webhook.IngestionJob;
@@ -23,6 +24,7 @@ public class LocalIndexTriggerService {
     private final FactExtractor factExtractor;
     private final PeripheralDetector peripheralDetector;
     private final DualWriteService dualWriteService;
+    private final GraphFactProjector graphProjector;
     private final AnalysisRunTracker runTracker;
 
     public LocalIndexTriggerService(LocalDirectoryFetcher localFetcher,
@@ -31,6 +33,7 @@ public class LocalIndexTriggerService {
                                      FactExtractor factExtractor,
                                      PeripheralDetector peripheralDetector,
                                      DualWriteService dualWriteService,
+                                     GraphFactProjector graphProjector,
                                      AnalysisRunTracker runTracker) {
         this.localFetcher      = localFetcher;
         this.registryService   = registryService;
@@ -38,6 +41,7 @@ public class LocalIndexTriggerService {
         this.factExtractor     = factExtractor;
         this.peripheralDetector = peripheralDetector;
         this.dualWriteService  = dualWriteService;
+        this.graphProjector    = graphProjector;
         this.runTracker        = runTracker;
     }
 
@@ -85,6 +89,11 @@ public class LocalIndexTriggerService {
                     .toList();
 
             var symbolFacts     = models.stream().flatMap(m -> factExtractor.extractSymbolFacts(m).stream()).toList();
+            var methodFacts     = models.stream().flatMap(m -> factExtractor.extractMethodFacts(m).stream()).toList();
+            var enumFacts       = models.stream().flatMap(m -> factExtractor.extractEnumFacts(m).stream()).toList();
+            var allSymbolFacts  = new java.util.ArrayList<>(symbolFacts);
+            allSymbolFacts.addAll(methodFacts);
+            allSymbolFacts.addAll(enumFacts);
             var outboundFacts   = models.stream().flatMap(m -> factExtractor.extractOutboundCallFacts(m).stream()).toList();
             var peripheralFacts = models.stream().flatMap(m -> peripheralDetector.detect(m).stream()).toList();
             var unsupported     = models.stream().flatMap(m -> factExtractor.extractUnsupportedConstructFacts(m).stream()).toList();
@@ -92,13 +101,14 @@ public class LocalIndexTriggerService {
             FactBatch batch = new FactBatch(
                     jobId, request.orgId(), serviceName, svc.serviceId(),
                     commitSha, "BASELINE",
-                    symbolFacts, outboundFacts, peripheralFacts, unsupported
+                    allSymbolFacts, outboundFacts, peripheralFacts, unsupported
             );
 
             dualWriteService.write(batch, models);
+            graphProjector.project(batch, models);
             runTracker.markComplete(jobId);
             log.info("Local index complete for {}: {} files, {} symbol facts",
-                    serviceName, files.size(), symbolFacts.size());
+                    serviceName, files.size(), allSymbolFacts.size());
 
             return new LocalIndexTriggerResponse(
                     svc.serviceId(), serviceName, commitSha, files.size(), autoRegistered);

@@ -1,5 +1,6 @@
 package io.testseer.backend.ingestion;
 
+import io.testseer.backend.graph.GraphFactProjector;
 import io.testseer.backend.webhook.IngestionJob;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,6 +18,7 @@ public class WorkerPipeline {
     private final FactExtractor factExtractor;
     private final PeripheralDetector peripheralDetector;
     private final DualWriteService dualWriteService;
+    private final GraphFactProjector graphProjector;
     private final AnalysisRunTracker runTracker;
 
     public WorkerPipeline(GitHubSourceFetcher fetcher,
@@ -24,12 +26,14 @@ public class WorkerPipeline {
                           FactExtractor factExtractor,
                           PeripheralDetector peripheralDetector,
                           DualWriteService dualWriteService,
+                          GraphFactProjector graphProjector,
                           AnalysisRunTracker runTracker) {
         this.fetcher = fetcher;
         this.parserService = parserService;
         this.factExtractor = factExtractor;
         this.peripheralDetector = peripheralDetector;
         this.dualWriteService = dualWriteService;
+        this.graphProjector = graphProjector;
         this.runTracker = runTracker;
     }
 
@@ -47,6 +51,15 @@ public class WorkerPipeline {
             List<FactBatch.SymbolFact> symbolFacts = models.stream()
                     .flatMap(m -> factExtractor.extractSymbolFacts(m).stream())
                     .toList();
+            List<FactBatch.SymbolFact> methodFacts = models.stream()
+                    .flatMap(m -> factExtractor.extractMethodFacts(m).stream())
+                    .toList();
+            List<FactBatch.SymbolFact> enumFacts = models.stream()
+                    .flatMap(m -> factExtractor.extractEnumFacts(m).stream())
+                    .toList();
+            List<FactBatch.SymbolFact> allSymbolFacts = new java.util.ArrayList<>(symbolFacts);
+            allSymbolFacts.addAll(methodFacts);
+            allSymbolFacts.addAll(enumFacts);
             List<FactBatch.OutboundCallFact> outboundFacts = models.stream()
                     .flatMap(m -> factExtractor.extractOutboundCallFacts(m).stream())
                     .toList();
@@ -68,13 +81,14 @@ public class WorkerPipeline {
             FactBatch batch = new FactBatch(
                     job.jobId(), job.orgId(), job.repo(), job.serviceId(),
                     job.commitSha(), snapshotType,
-                    symbolFacts, outboundFacts, peripheralFacts, unsupported
+                    allSymbolFacts, outboundFacts, peripheralFacts, unsupported
             );
 
             dualWriteService.write(batch, models);
+            graphProjector.project(batch, models);
             runTracker.markComplete(job.jobId());
             log.info("Job {} complete: {} symbol facts, {} peripheral facts",
-                    job.jobId(), symbolFacts.size(), peripheralFacts.size());
+                    job.jobId(), allSymbolFacts.size(), peripheralFacts.size());
         } catch (Exception ex) {
             runTracker.markFailed(job.jobId(), ex.getMessage());
             throw ex;  // re-throw so Kafka consumer does not acknowledge

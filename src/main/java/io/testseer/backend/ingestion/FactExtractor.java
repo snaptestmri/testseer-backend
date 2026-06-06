@@ -54,6 +54,42 @@ public class FactExtractor {
         ));
     }
 
+    public List<FactBatch.SymbolFact> extractMethodFacts(ParsedModel model) {
+        if (model.classFqn() == null || model.publicMethods().isEmpty()) return List.of();
+
+        return model.publicMethods().stream()
+                .map(m -> new FactBatch.SymbolFact(
+                        model.filePath(),
+                        model.classFqn() + "#" + m.name(),
+                        "METHOD",
+                        toJson(Map.of(
+                                "returnType",       m.returnType(),
+                                "parameterTypes",   m.parameterTypes(),
+                                "thrownExceptions", m.thrownExceptions(),
+                                "javadoc",          m.javadoc() != null ? m.javadoc() : ""
+                        )),
+                        "javaparser",
+                        1.0
+                ))
+                .toList();
+    }
+
+    public List<FactBatch.SymbolFact> extractEnumFacts(ParsedModel model) {
+        if (model.classFqn() == null || model.enumValues().isEmpty()) return List.of();
+
+        return List.of(new FactBatch.SymbolFact(
+                model.filePath(),
+                model.classFqn(),
+                "ENUM",
+                toJson(Map.of(
+                        "enumValues", model.enumValues(),
+                        "javadoc",    model.classJavadoc() != null ? model.classJavadoc() : ""
+                )),
+                "javaparser",
+                1.0
+        ));
+    }
+
     private String toJson(Object value) {
         try {
             return mapper.writeValueAsString(value);
