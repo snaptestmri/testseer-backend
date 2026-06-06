@@ -1,5 +1,10 @@
 # TestSeer Backend
 
+> **Status:** Canonical  
+> **Last verified:** 2026-06-05  
+> **Platform status:** [../docs/CURRENT_STATUS.md](../docs/CURRENT_STATUS.md)  
+> **Architecture docs:** [docs/README.md](docs/README.md)
+
 Central indexing and analysis platform for [TestSeer](https://github.com/snaptestmri/testseer-mcp). Parses Java services, builds a cross-service knowledge graph, and answers the question: **given a PR that changed X, what should the developer test?**
 
 Companion project: [testseer-mcp](https://github.com/snaptestmri/testseer-mcp) — exposes this API as Cursor MCP tools.
@@ -114,6 +119,9 @@ API tags in Swagger UI: **Service Registry**, **Webhook**, **Admin — Indexing*
 |------|----------|-------------|
 | **Registry** | `POST /registry/services` | Register a service |
 | | `GET /registry/services` | List all services |
+| | `GET /registry/services/{serviceId}` | Get one service |
+| | `PATCH /registry/services/{serviceId}` | Update overrides or disable |
+| | `DELETE /registry/services/{serviceId}` | Soft-delete (sets `enabled = false`) |
 | **Ingestion** | `POST /webhook/github` | GitHub PR/push webhook |
 | | `POST /admin/index/{serviceId}` | On-demand GitHub re-index |
 | | `POST /admin/index/local` | Index from local filesystem |
@@ -127,7 +135,9 @@ API tags in Swagger UI: **Service Registry**, **Webhook**, **Admin — Indexing*
 | | `GET /v1/graph/neighborhood` | Depth-1 neighbours |
 | | `GET /v1/graph/shared-type` | Shared library type lookup |
 | | `GET /v1/graph/type-fanout` | All consumers of a type |
+| | — | `crossServiceBoundary` exists in `GraphProjectionService` but has **no REST route** |
 | **Analysis** | `GET /v1/impact/pr` | **PR impact analysis** — changed symbols, callers, test suggestions |
+| | — | `GET /v1/gaps` — **planned (P12)**; partial substitute: `missingTestClasses` in impact response |
 | | `GET /v1/services/{id}/description` | LLM-generated service description |
 | | `POST /v1/services/{id}/description` | Regenerate description |
 
