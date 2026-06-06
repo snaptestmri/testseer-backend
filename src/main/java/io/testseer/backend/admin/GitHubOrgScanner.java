@@ -2,6 +2,7 @@ package io.testseer.backend.admin;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -19,6 +20,7 @@ public class GitHubOrgScanner {
 
     private final RestClient restClient;
 
+    @Autowired
     public GitHubOrgScanner(
             @Value("${testseer.github.token:}") String githubToken) {
         RestClient.Builder builder = RestClient.builder()

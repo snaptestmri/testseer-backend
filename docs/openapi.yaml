@@ -1,0 +1,688 @@
+# TestSeer REST API — OpenAPI 3.0
+#
+# Prefer auto-generated output from a running server (includes full schemas):
+#   mvn test -Dtest=OpenApiExportTest          # requires Docker
+#   ./scripts/export-openapi.sh                # server on localhost:8080
+#   curl -s http://localhost:8080/v3/api-docs.yaml -o docs/openapi.yaml
+#
+openapi: 3.0.1
+info:
+  title: TestSeer API
+  description: |
+    TestSeer analyses Java service codebases to produce a structured
+    knowledge graph of classes, endpoints, and outbound HTTP calls.
+    Use the Query API to ask questions about your services — reachability,
+    impact analysis, shared type consumers — and always get freshness
+    metadata alongside results.
+  version: 0.1.0
+  contact:
+    name: TestSeer Team
+    email: team@testseer.io
+  license:
+    name: Proprietary
+servers:
+  - url: http://localhost:8080
+    description: Local development
+tags:
+  - name: Service Registry
+    description: Register and manage services for TestSeer analysis
+  - name: Webhook
+    description: GitHub webhook receiver for push and pull_request events
+  - name: Admin — Indexing
+    description: Trigger on-demand indexing of Java services
+  - name: Admin — Discovery
+    description: Auto-register services by scanning a GitHub organisation
+  - name: Query — Facts
+    description: Retrieve indexed facts about classes and outbound HTTP calls
+  - name: Query — Graph
+    description: "Graph traversal queries: reachability, impact, neighbourhood, shared types"
+  - name: Query — Status
+    description: Service indexing freshness and metadata
+  - name: Analysis
+    description: Impact analysis and test planning based on the indexed knowledge graph
+paths:
+  /registry/services:
+    get:
+      tags: [Service Registry]
+      summary: List all services
+      description: Returns all registered services across all organisations.
+      operationId: listServices
+      responses:
+        '200':
+          description: List of services
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ServiceEntry'
+    post:
+      tags: [Service Registry]
+      summary: Register a service
+      description: Registers a new service for indexing. Returns the assigned serviceId.
+      operationId: registerService
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistrationRequest'
+      responses:
+        '201':
+          description: Service registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceEntry'
+        '400':
+          description: Invalid registration request
+  /registry/services/{serviceId}:
+    get:
+      tags: [Service Registry]
+      summary: Get a service by ID
+      operationId: getServiceById
+      parameters:
+        - $ref: '#/components/parameters/serviceIdPath'
+      responses:
+        '200':
+          description: Service found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceEntry'
+        '404':
+          description: Service not found
+    patch:
+      tags: [Service Registry]
+      summary: Update service metadata
+      operationId: updateService
+      parameters:
+        - $ref: '#/components/parameters/serviceIdPath'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistryUpdateRequest'
+      responses:
+        '200':
+          description: Service updated
+    delete:
+      tags: [Service Registry]
+      summary: Disable a service
+      description: Disables a service, stopping future indexing jobs.
+      operationId: disableService
+      parameters:
+        - $ref: '#/components/parameters/serviceIdPath'
+      responses:
+        '204':
+          description: Service disabled
+  /webhook/github:
+    post:
+      tags: [Webhook]
+      summary: Receive GitHub webhook events
+      description: Handles push and pull_request events to trigger indexing jobs.
+      operationId: githubWebhook
+      parameters:
+        - name: X-GitHub-Event
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-Hub-Signature-256
+          in: header
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '202':
+          description: Event accepted
+        '400':
+          description: Invalid payload or signature
+  /admin/index/{serviceId}:
+    post:
+      tags: [Admin — Indexing]
+      summary: Trigger GitHub re-index for a service
+      operationId: triggerIndex
+      parameters:
+        - $ref: '#/components/parameters/serviceIdPath'
+      responses:
+        '202':
+          description: Index job accepted
+        '404':
+          description: Service not found
+  /admin/index/local:
+    post:
+      tags: [Admin — Indexing]
+      summary: Index from local filesystem
+      description: Indexes all Java files in a server-accessible directory.
+      operationId: triggerLocalIndex
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocalIndexTriggerRequest'
+      responses:
+        '202':
+          description: Local index job accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocalIndexTriggerResponse'
+        '400':
+          description: Invalid request
+  /admin/discover:
+    post:
+      tags: [Admin — Discovery]
+      summary: Discover and register all Java services in a GitHub org
+      description: |
+        Scans every non-archived, non-fork repository in the organisation.
+        Repositories containing pom.xml (MAVEN) or build.gradle (GRADLE) at the
+        root are auto-registered. Already-registered services appear in alreadyKnown.
+      operationId: discoverServices
+      parameters:
+        - name: orgId
+          in: query
+          required: true
+          description: GitHub organisation login (e.g. acme)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Discovery complete
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryResult'
+        '400':
+          description: orgId parameter is missing
+  /v1/status/{serviceId}:
+    get:
+      tags: [Query — Status]
+      summary: Get indexing status for a service
+      operationId: getServiceStatus
+      parameters:
+        - $ref: '#/components/parameters/serviceIdPath'
+      responses:
+        '200':
+          description: Status returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResponseEnvelope'
+        '404':
+          description: Service not found
+  /v1/facts/class:
+    get:
+      tags: [Query — Facts]
+      summary: Get symbol facts for a class
+      description: |
+        Returns all indexed symbol facts for the given class FQN within a service.
+        Results are Redis-cached. Returns 404 if never indexed, 202 if indexing in progress.
+      operationId: getClassFacts
+      parameters:
+        - $ref: '#/components/parameters/serviceId'
+        - name: symbolFqn
+          in: query
+          required: true
+          description: Fully-qualified class name, e.g. com.example.OrdersController
+          schema:
+            type: string
+        - $ref: '#/components/parameters/orgId'
+        - $ref: '#/components/parameters/repo'
+      responses:
+        '200':
+          description: Facts returned
+        '202':
+          description: Indexing in progress
+        '404':
+          description: Service not indexed
+  /v1/facts/outbound:
+    get:
+      tags: [Query — Facts]
+      summary: Get outbound HTTP call facts
+      operationId: getOutboundFacts
+      parameters:
+        - $ref: '#/components/parameters/serviceId'
+        - $ref: '#/components/parameters/orgId'
+        - $ref: '#/components/parameters/repo'
+        - name: sourceSymbol
+          in: query
+          required: false
+          description: Filter by caller class FQN
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Outbound call facts returned
+        '202':
+          description: Indexing in progress
+        '404':
+          description: Service not indexed
+  /v1/facts/by-file:
+    get:
+      tags: [Query — Facts]
+      summary: Get symbol facts for specific file paths
+      description: |
+        Returns indexed CLASS and ENDPOINT symbols for the given file paths.
+        Used by the MCP server to map GitHub PR changed files to indexed endpoints.
+      operationId: getFactsByFile
+      parameters:
+        - $ref: '#/components/parameters/serviceId'
+        - name: filePaths
+          in: query
+          required: false
+          description: File paths to look up (repeat parameter for multiple paths)
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - $ref: '#/components/parameters/orgId'
+        - $ref: '#/components/parameters/repo'
+      responses:
+        '200':
+          description: Symbols found (may be empty)
+        '404':
+          description: Service not indexed
+  /v1/graph/reachability:
+    get:
+      tags: [Query — Graph]
+      summary: Forward reachability
+      description: Which services or classes does this node transitively call?
+      operationId: graphReachability
+      parameters:
+        - $ref: '#/components/parameters/serviceId'
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [service, class]
+            default: service
+          description: Traversal type
+        - $ref: '#/components/parameters/orgId'
+        - $ref: '#/components/parameters/repo'
+      responses:
+        '200':
+          description: Reachability result
+        '202':
+          description: Indexing in progress
+        '404':
+          description: Service not indexed
+  /v1/graph/impact:
+    get:
+      tags: [Query — Graph]
+      summary: Reverse reachability (impact analysis)
+      description: Which services or classes would be impacted if this node changes?
+      operationId: graphImpact
+      parameters:
+        - name: nodeId
+          in: query
+          required: true
+          description: Graph node ID
+          schema:
+            type: string
+        - $ref: '#/components/parameters/serviceId'
+        - $ref: '#/components/parameters/orgId'
+        - $ref: '#/components/parameters/repo'
+      responses:
+        '200':
+          description: Impact result
+        '404':
+          description: Node not indexed
+  /v1/graph/neighborhood:
+    get:
+      tags: [Query — Graph]
+      summary: Immediate neighbourhood
+      description: Returns all direct (depth-1) neighbours of the given node.
+      operationId: graphNeighborhood
+      parameters:
+        - name: nodeId
+          in: query
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/serviceId'
+        - $ref: '#/components/parameters/orgId'
+        - $ref: '#/components/parameters/repo'
+      responses:
+        '200':
+          description: Neighbourhood result
+        '404':
+          description: Node not indexed
+  /v1/graph/shared-type:
+    get:
+      tags: [Query — Graph]
+      summary: Shared type resolution
+      description: Which services use this shared library type?
+      operationId: graphSharedType
+      parameters:
+        - name: symbolFqn
+          in: query
+          required: true
+          description: Fully-qualified type name
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Services using this type
+  /v1/graph/type-fanout:
+    get:
+      tags: [Query — Graph]
+      summary: Type fanout
+      description: All consumers of a shared library type across the graph.
+      operationId: graphTypeFanout
+      parameters:
+        - name: symbolFqn
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Fanout result
+  /v1/impact/pr:
+    get:
+      tags: [Analysis]
+      summary: PR impact analysis
+      description: |
+        Given a service and commit SHA, returns changed symbols, upstream callers,
+        downstream dependencies, and suggested test scope. Returns 404 if the
+        service or commit has never been indexed.
+      operationId: prImpact
+      parameters:
+        - $ref: '#/components/parameters/serviceId'
+        - name: commitSha
+          in: query
+          required: true
+          description: Git commit SHA to analyse
+          schema:
+            type: string
+        - $ref: '#/components/parameters/orgId'
+        - $ref: '#/components/parameters/repo'
+      responses:
+        '200':
+          description: Impact report generated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ImpactReport'
+        '202':
+          description: Indexing in progress
+        '400':
+          description: Required parameter missing
+        '404':
+          description: Service or commit not indexed
+  /v1/services/{serviceId}/description:
+    get:
+      tags: [Analysis]
+      summary: Get cached business description for a service
+      operationId: getServiceDescription
+      parameters:
+        - $ref: '#/components/parameters/serviceIdPath'
+      responses:
+        '200':
+          description: Description text
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: No description generated yet
+        '503':
+          description: LLM description disabled (ANTHROPIC_ENABLED=false)
+    post:
+      tags: [Analysis]
+      summary: Generate business description via Claude API
+      operationId: generateServiceDescription
+      parameters:
+        - $ref: '#/components/parameters/serviceIdPath'
+      responses:
+        '200':
+          description: Generated description
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: LLM description disabled
+components:
+  parameters:
+    serviceId:
+      name: serviceId
+      in: query
+      required: true
+      description: Service identifier
+      schema:
+        type: string
+    serviceIdPath:
+      name: serviceId
+      in: path
+      required: true
+      description: Unique service identifier
+      schema:
+        type: string
+    orgId:
+      name: orgId
+      in: query
+      required: false
+      description: Organisation ID
+      schema:
+        type: string
+        default: acme
+    repo:
+      name: repo
+      in: query
+      required: false
+      description: Repository name
+      schema:
+        type: string
+        default: ""
+  schemas:
+    ResponseEnvelope:
+      type: object
+      properties:
+        schemaVersion:
+          type: string
+          example: "1.0"
+        indexedAt:
+          type: string
+          format: date-time
+          nullable: true
+        commitSha:
+          type: string
+          nullable: true
+        freshnessStatus:
+          type: string
+          enum: [CURRENT, STALE, INDEXING, NOT_INDEXED]
+        data:
+          nullable: true
+    RegistrationRequest:
+      type: object
+      required: [orgId, repo, serviceName, buildTool]
+      properties:
+        orgId:
+          type: string
+        repo:
+          type: string
+        serviceName:
+          type: string
+        buildTool:
+          type: string
+          enum: [MAVEN, GRADLE]
+        moduleType:
+          type: string
+        sourceRoots:
+          type: array
+          items:
+            type: string
+        testRoots:
+          type: array
+          items:
+            type: string
+        ownerTeam:
+          type: string
+    RegistryUpdateRequest:
+      type: object
+      properties:
+        serviceName:
+          type: string
+        ownerTeam:
+          type: string
+        sourceRoots:
+          type: array
+          items:
+            type: string
+        testRoots:
+          type: array
+          items:
+            type: string
+    ServiceEntry:
+      type: object
+      properties:
+        serviceId:
+          type: string
+        orgId:
+          type: string
+        repo:
+          type: string
+        serviceName:
+          type: string
+        buildTool:
+          type: string
+        moduleType:
+          type: string
+        status:
+          type: string
+    LocalIndexTriggerRequest:
+      type: object
+      required: [orgId, path]
+      properties:
+        orgId:
+          type: string
+          example: acme
+        path:
+          type: string
+          example: /workspace/orders
+    LocalIndexTriggerResponse:
+      type: object
+      properties:
+        serviceId:
+          type: string
+        jobId:
+          type: string
+        status:
+          type: string
+    DiscoveryResult:
+      type: object
+      properties:
+        orgId:
+          type: string
+        registered:
+          type: array
+          items:
+            type: string
+        alreadyKnown:
+          type: array
+          items:
+            type: string
+        skipped:
+          type: array
+          items:
+            type: string
+    ImpactReport:
+      type: object
+      properties:
+        serviceId:
+          type: string
+        commitSha:
+          type: string
+        changedSymbols:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChangedSymbol'
+        affectedConsumers:
+          type: array
+          items:
+            $ref: '#/components/schemas/AffectedConsumer'
+        downstreamDependencies:
+          type: array
+          items:
+            $ref: '#/components/schemas/DownstreamDependency'
+        suggestedTestScope:
+          type: array
+          items:
+            $ref: '#/components/schemas/SuggestedTest'
+        missingTestClasses:
+          type: array
+          items:
+            type: string
+    ChangedSymbol:
+      type: object
+      properties:
+        symbolFqn:
+          type: string
+        symbolKind:
+          type: string
+        filePath:
+          type: string
+        httpMethod:
+          type: string
+          nullable: true
+        path:
+          type: string
+          nullable: true
+    AffectedConsumer:
+      type: object
+      properties:
+        source:
+          type: string
+        consumerServiceId:
+          type: string
+        consumerServiceName:
+          type: string
+        consumerClass:
+          type: string
+        nodeType:
+          type: string
+        httpMethod:
+          type: string
+          nullable: true
+        path:
+          type: string
+          nullable: true
+    DownstreamDependency:
+      type: object
+      properties:
+        callerClass:
+          type: string
+        httpMethod:
+          type: string
+        path:
+          type: string
+    SuggestedTest:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [UNIT, INTEGRATION]
+        className:
+          type: string
+        targetService:
+          type: string
+          nullable: true
+        exists:
+          type: boolean
+        reason:
+          type: string

@@ -80,9 +80,35 @@ curl http://localhost:8080/v1/status/SERVICE_ID
 curl "http://localhost:8080/v1/impact/pr?serviceId=SERVICE_ID&commitSha=COMMIT_SHA"
 ```
 
-## API overview
+## Swagger / OpenAPI
 
-Interactive docs: **http://localhost:8080/swagger-ui.html**
+All REST controllers are annotated with OpenAPI 3 metadata (springdoc). With the server running:
+
+| Resource | URL |
+|----------|-----|
+| **Swagger UI** | http://localhost:8080/swagger-ui/index.html |
+| **OpenAPI JSON** | http://localhost:8080/v3/api-docs |
+| **OpenAPI YAML** | http://localhost:8080/v3/api-docs.yaml |
+
+A static spec is checked in at [`docs/openapi.yaml`](docs/openapi.yaml) for clients that do not run the server (e.g. code generators, the MCP server).
+
+Regenerate after API changes:
+
+```bash
+mvn test -Dtest=OpenApiExportTest
+```
+
+Download from a running server:
+
+```bash
+./scripts/export-openapi.sh
+# or
+curl -s http://localhost:8080/v3/api-docs.yaml -o docs/openapi.yaml
+```
+
+API tags in Swagger UI: **Service Registry**, **Webhook**, **Admin — Indexing**, **Admin — Discovery**, **Query — Facts**, **Query — Graph**, **Query — Status**, **Analysis**.
+
+## API overview
 
 | Area | Endpoint | Description |
 |------|----------|-------------|
