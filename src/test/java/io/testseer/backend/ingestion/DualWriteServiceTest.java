@@ -82,7 +82,8 @@ class DualWriteServiceTest {
         ParsedModel model = new ParsedModel(
                 "OrderController.java", "com.example.OrderController",
                 List.of("RestController"), List.of(), List.of(),
-                List.of(), List.of(), false, null
+                List.of(), List.of(), false, null,
+                null, List.of(), List.of()
         );
         FactBatch batch = new FactBatch(
                 "job-002", "acme", "order-service", serviceId, "abc123", "DELTA",

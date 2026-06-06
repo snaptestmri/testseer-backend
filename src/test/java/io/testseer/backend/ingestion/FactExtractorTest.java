@@ -19,7 +19,8 @@ class FactExtractorTest {
                 List.of(),
                 List.of(new ParsedModel.EndpointDef(httpMethod, path, "getOrder")),
                 List.of(),
-                false, null
+                false, null,
+                null, List.of(), List.of()
         );
     }
 
@@ -53,7 +54,8 @@ class FactExtractorTest {
                 "OrderService.java", "com.example.OrderService",
                 List.of(), List.of("RestClient"), List.of(),
                 List.of(), List.of(new ParsedModel.OutboundCallDef("RestClient", "GET", "/inventory", "getInventory")),
-                false, null
+                false, null,
+                null, List.of(), List.of()
         );
 
         List<FactBatch.OutboundCallFact> facts = extractor.extractOutboundCallFacts(model);
@@ -67,7 +69,8 @@ class FactExtractorTest {
     void unsupportedConstruct_emittedForParseError() {
         ParsedModel errorModel = new ParsedModel(
                 "Bad.java", null, List.of(), List.of(), List.of(),
-                List.of(), List.of(), true, "complex annotation"
+                List.of(), List.of(), true, "complex annotation",
+                null, List.of(), List.of()
         );
 
         List<FactBatch.UnsupportedConstructFact> facts =

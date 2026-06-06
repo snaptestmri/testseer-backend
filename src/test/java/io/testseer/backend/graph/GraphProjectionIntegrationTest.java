@@ -1,5 +1,8 @@
 package io.testseer.backend.graph;
 
+import io.testseer.backend.ingestion.FactBatch;
+import io.testseer.backend.ingestion.ParsedModel;
+import io.testseer.backend.registry.RegistrationRequest;
 import io.testseer.backend.registry.ServiceRegistryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,6 +38,8 @@ class GraphProjectionIntegrationTest {
     @Autowired ServiceRegistryService svcRegistry;
     @Autowired JdbcClient db;
     @Autowired IncrementalEdgeUpdater edgeUpdater;
+    @Autowired GraphFactProjector graphProjector;
+    @Autowired io.testseer.backend.ingestion.FactExtractor factExtractor;
 
     @BeforeEach
     void setup() {
@@ -112,6 +117,50 @@ class GraphProjectionIntegrationTest {
         ReachabilityResult after = graphService.classDependsOnClassForward("cls-order-ctrl");
         assertThat(after.nodeIds()).doesNotContain("cls-order-svc");
         assertThat(after.nodeIds()).contains("cls-payment-svc");
+    }
+
+    @Test
+    void graphFactProjector_projectsParsedModels_andReverseReachabilityWorks() {
+        db.sql("DELETE FROM graph_edges").update();
+        db.sql("DELETE FROM graph_nodes").update();
+        db.sql("DELETE FROM service_registry").update();
+        db.sql("DELETE FROM symbol_facts").update();
+
+        var reg = svcRegistry.register(new RegistrationRequest(
+                "acme", "orders-repo", "orders-svc", "MAVEN", "service",
+                List.of("src/main/java"), List.of("src/test/java"), null));
+        String serviceId = reg.serviceId();
+
+        ParsedModel orderService = new ParsedModel(
+                "src/main/java/com/example/OrderService.java",
+                "com.example.OrderService",
+                List.of(), List.of(), List.of("OrderRepository"),
+                List.of(), List.of(), false, null,
+                null, List.of(), List.of());
+
+        ParsedModel orderController = new ParsedModel(
+                "src/main/java/com/example/OrderController.java",
+                "com.example.OrderController",
+                List.of("RestController"),
+                List.of("OrderService"), List.of(),
+                List.of(new ParsedModel.EndpointDef("GET", "/orders/{id}", "getOrder")),
+                List.of(), false, null,
+                null, List.of(), List.of());
+
+        var batch2Facts = factExtractor.extractSymbolFacts(orderService);
+        FactBatch batchFull = new FactBatch(
+                "job-1", "acme", "orders-repo", serviceId, "abc123", "BASELINE",
+                java.util.stream.Stream.concat(
+                        factExtractor.extractSymbolFacts(orderController).stream(),
+                        batch2Facts.stream()).toList(),
+                List.of(), List.of(), List.of());
+
+        graphProjector.project(batchFull, List.of(orderService, orderController));
+
+        ReachabilityResult impact = graphService.reverseReachability(
+                GraphNodeIds.classNode(serviceId, "com.example.OrderService"));
+        assertThat(impact.nodeIds()).contains(
+                GraphNodeIds.classNode(serviceId, "com.example.OrderController"));
     }
 
     @Test

@@ -11,8 +11,22 @@ public record ParsedModel(
         List<EndpointDef> endpoints,
         List<OutboundCallDef> outboundCalls,
         boolean parseError,
-        String parseErrorDetail
+        String parseErrorDetail,
+        // Semantic enrichment — null/empty when not yet extracted
+        String classJavadoc,
+        List<MethodDef> publicMethods,
+        List<String> enumValues
 ) {
     public record EndpointDef(String httpMethod, String path, String methodName) {}
-    public record OutboundCallDef(String clientType, String httpMethod, String path, String sourceMethod) {}
+
+    public record OutboundCallDef(String clientType, String httpMethod, String path,
+                                   String sourceMethod) {}
+
+    public record MethodDef(
+            String name,
+            String javadoc,
+            String returnType,
+            List<String> parameterTypes,
+            List<String> thrownExceptions
+    ) {}
 }

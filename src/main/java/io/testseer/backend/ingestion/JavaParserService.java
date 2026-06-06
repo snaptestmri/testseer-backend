@@ -50,7 +50,8 @@ public class JavaParserService {
                     : result.getProblems().get(0).getMessage();
             return new ParsedModel(
                     filePath, null, List.of(), List.of(), List.of(),
-                    List.of(), List.of(), true, detail
+                    List.of(), List.of(), true, detail,
+                    null, List.of(), List.of()
             );
         }
 
@@ -70,7 +71,8 @@ public class JavaParserService {
 
         if (primaryClass.isEmpty()) {
             return new ParsedModel(filePath, null, List.of(), List.of(), List.of(),
-                    List.of(), List.of(), false, null);
+                    List.of(), List.of(), false, null,
+                    null, List.of(), List.of());
         }
 
         ClassOrInterfaceDeclaration cls = primaryClass.get();
@@ -115,7 +117,8 @@ public class JavaParserService {
 
         return new ParsedModel(
                 filePath, classFqn, annotations, constructorParams,
-                fieldInjections, endpoints, outboundCalls, false, null
+                fieldInjections, endpoints, outboundCalls, false, null,
+                null, List.of(), List.of()
         );
     }
 

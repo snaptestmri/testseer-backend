@@ -1,5 +1,6 @@
 package io.testseer.backend.admin;
 
+import io.testseer.backend.graph.GraphFactProjector;
 import io.testseer.backend.ingestion.*;
 import io.testseer.backend.registry.*;
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,7 @@ class LocalIndexTriggerServiceTest {
     @Mock FactExtractor factExtractor;
     @Mock PeripheralDetector peripheralDetector;
     @Mock DualWriteService dualWriteService;
+    @Mock GraphFactProjector graphProjector;
     @Mock AnalysisRunTracker runTracker;
 
     @InjectMocks LocalIndexTriggerService service;
@@ -45,7 +47,8 @@ class LocalIndexTriggerServiceTest {
         when(registryService.register(any())).thenReturn(entry("svc-new"));
         when(parserService.parse(any(), any())).thenReturn(
                 new ParsedModel("Foo.java", null, List.of(), List.of(),
-                        List.of(), List.of(), List.of(), false, null));
+                        List.of(), List.of(), List.of(), false, null,
+                        null, List.of(), List.of()));
         when(factExtractor.extractSymbolFacts(any())).thenReturn(List.of());
         when(factExtractor.extractOutboundCallFacts(any())).thenReturn(List.of());
         when(factExtractor.extractUnsupportedConstructFacts(any())).thenReturn(List.of());
@@ -60,6 +63,7 @@ class LocalIndexTriggerServiceTest {
         assertThat(resp.commitSha()).isEqualTo("abc123");
         assertThat(resp.fileCount()).isEqualTo(1);
         verify(dualWriteService).write(any(), any());
+        verify(graphProjector).project(any(), any());
         verify(runTracker).markComplete(any());
     }
 
