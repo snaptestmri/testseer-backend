@@ -38,6 +38,9 @@ testseer:
   stale-threshold-minutes: 60
   pubsub:
     enabled: ${PUBSUB_ENABLED:false}
+  anthropic:
+    api-key: ${ANTHROPIC_API_KEY:}
+    enabled: ${ANTHROPIC_ENABLED:false}
 
 logging:
   level:
