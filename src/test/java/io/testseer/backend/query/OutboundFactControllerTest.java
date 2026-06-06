@@ -63,4 +63,38 @@ class OutboundFactControllerTest {
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.freshnessStatus").value("INDEXING"));
     }
+
+    @Test
+    void byFile_returns200_withEmptyListWhenNoPaths() throws Exception {
+        when(freshnessResolver.resolve(anyString(), anyInt())).thenReturn(FreshnessStatus.CURRENT);
+
+        mockMvc.perform(get("/v1/facts/by-file")
+                        .param("serviceId", "svc-001")
+                        .param("orgId", "acme"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.freshnessStatus").value("CURRENT"))
+                .andExpect(jsonPath("$.data").isArray());
+    }
+
+    @Test
+    void byFile_returns200_forMatchingFiles() throws Exception {
+        when(freshnessResolver.resolve(anyString(), anyInt())).thenReturn(FreshnessStatus.CURRENT);
+
+        mockMvc.perform(get("/v1/facts/by-file")
+                        .param("serviceId", "svc-001")
+                        .param("filePaths", "src/main/java/io/orders/OrderController.java")
+                        .param("orgId", "acme"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.freshnessStatus").value("CURRENT"));
+    }
+
+    @Test
+    void byFile_returns404_whenNotIndexed() throws Exception {
+        when(freshnessResolver.resolve(anyString(), anyInt())).thenReturn(FreshnessStatus.NOT_INDEXED);
+
+        mockMvc.perform(get("/v1/facts/by-file")
+                        .param("serviceId", "svc-missing")
+                        .param("filePaths", "src/main/java/Foo.java"))
+                .andExpect(status().isNotFound());
+    }
 }

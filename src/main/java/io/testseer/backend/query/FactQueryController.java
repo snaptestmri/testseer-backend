@@ -158,6 +158,68 @@ public class FactQueryController {
         return ResponseEntity.status(httpStatus).body(envelope);
     }
 
+    @Operation(
+        summary = "Get symbol facts for specific file paths",
+        description = """
+            Returns all indexed symbols (CLASS, ENDPOINT) for the given file paths \
+            within a service. Used by the MCP server to map GitHub PR changed files to \
+            their indexed endpoints and classes.""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Symbols found (may be empty if files not indexed)"),
+        @ApiResponse(responseCode = "404", description = "Service not indexed")
+    })
+    @GetMapping("/by-file")
+    public ResponseEntity<ResponseEnvelope<List<SymbolFactView>>> getByFile(
+            @Parameter(description = "Service identifier", required = true) @RequestParam String serviceId,
+            @Parameter(description = "File paths to look up") @RequestParam(required = false) List<String> filePaths,
+            @Parameter(description = "Organisation ID") @RequestParam(defaultValue = "acme") String orgId,
+            @Parameter(description = "Repository name") @RequestParam(defaultValue = "") String repo) {
+
+        FreshnessStatus status = freshnessResolver.resolve(serviceId, staleThresholdMinutes);
+        if (status == FreshnessStatus.NOT_INDEXED) {
+            return ResponseEntity.status(404).body(ResponseEnvelope.notIndexed());
+        }
+
+        if (filePaths == null || filePaths.isEmpty()) {
+            RunMeta run = latestRun(serviceId);
+            return ResponseEntity.ok(ResponseEnvelope.of(run.indexedAt(), run.commitSha(), status, List.of()));
+        }
+
+        List<SymbolFactView> symbols = querySymbolsByFile(serviceId, filePaths);
+        RunMeta run = latestRun(serviceId);
+        int httpStatus = status == FreshnessStatus.INDEXING ? 202 : 200;
+        return ResponseEntity.status(httpStatus)
+                .body(ResponseEnvelope.of(run.indexedAt(), run.commitSha(), status, symbols));
+    }
+
+    private List<SymbolFactView> querySymbolsByFile(String serviceId, List<String> filePaths) {
+        return db.sql("""
+                SELECT DISTINCT ON (symbol_fqn, symbol_kind)
+                       symbol_fqn, symbol_kind, attributes, evidence_source, confidence, indexed_at
+                FROM symbol_facts
+                WHERE service_id = :svcId
+                  AND file_path = ANY(:paths)
+                  AND symbol_kind IN ('CLASS', 'ENDPOINT')
+                  AND commit_sha = (
+                      SELECT commit_sha FROM analysis_runs
+                      WHERE service_id = :svcId AND status = 'COMPLETE'
+                      ORDER BY completed_at DESC LIMIT 1
+                  )
+                ORDER BY symbol_fqn, symbol_kind, indexed_at DESC
+                """)
+                .param("svcId", serviceId)
+                .param("paths", filePaths.toArray(new String[0]))
+                .query((rs, row) -> new SymbolFactView(
+                        rs.getString("symbol_fqn"),
+                        rs.getString("symbol_kind"),
+                        rs.getString("attributes"),
+                        rs.getString("evidence_source"),
+                        rs.getDouble("confidence"),
+                        rs.getTimestamp("indexed_at").toInstant()
+                ))
+                .list();
+    }
+
     private List<OutboundCallView> queryOutboundFacts(String serviceId, String sourceSymbol) {
         String baseSql = """
                 SELECT source_symbol, http_method, path, evidence_source, confidence, indexed_at
