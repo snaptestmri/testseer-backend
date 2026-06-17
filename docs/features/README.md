@@ -40,6 +40,7 @@ Each document below describes one feature from **trigger → ingestion → stora
 | 27 | Service flow diagram composer | [27-service-flow-diagram.md](27-service-flow-diagram.md) · [Design](../TestSeer_BL054_Service_Flow_Diagram_Design.md) | BL-054 · `GET /v1/graph/flow-diagram`, Mermaid, domain-actor roles, manual graph parity |
 | 28 | Transaction-eval graph gap issues | [28-transaction-eval-graph-gap-issues.md](28-transaction-eval-graph-gap-issues.md) | TE-GAP-01–10 · root cause, requirements, validation curls for BL-050/054 pilot |
 | 29 | Maven dependency tree + versioning | [29-maven-dependency-tree.md](29-maven-dependency-tree.md) · [Design](../TestSeer_BL058_Maven_Dependency_Tree_Design.md) · [AC-MVN-4](../TestSeer_AC_MVN_4_Internal_Artifact_Link_Design.md) | BL-058 **Done** · `/v1/facts/maven-dependencies`, `/v1/graph/dependency-tree`, `POST /admin/maven/backfill-links`, MCP |
+| 30 | Receipt-service graph gap issues | [30-receipt-service-graph-gap-issues.md](30-receipt-service-graph-gap-issues.md) · [Design](../TestSeer_RS_Phase5_Implementation_Design.md) | RS-GAP-01–07 · REST interface→impl linker (BL-061 **Done**) |
 
 ## Cross-cutting designs
 
@@ -52,6 +53,7 @@ Each document below describes one feature from **trigger → ingestion → stora
 | Reachability subgraph hydration (TE-GAP-02) | [TestSeer_TE_GAP_02_Reachability_Hydration_Design.md](../TestSeer_TE_GAP_02_Reachability_Hydration_Design.md) · **Closed** 2026-06-16 |
 | Service flow diagram / manual graph parity (BL-054) | [TestSeer_BL054_Service_Flow_Diagram_Design.md](../TestSeer_BL054_Service_Flow_Diagram_Design.md) · [27-service-flow-diagram.md](27-service-flow-diagram.md) |
 | BL-050 P0 implementation (TE-GAP-01–04) | [TestSeer_BL050_P0_Implementation_Design.md](../TestSeer_BL050_P0_Implementation_Design.md) |
+| RS Phase 5 REST graph hardening (RS-GAP-01–07) | [TestSeer_RS_Phase5_Implementation_Design.md](../TestSeer_RS_Phase5_Implementation_Design.md) · [30-receipt-service-graph-gap-issues.md](30-receipt-service-graph-gap-issues.md) |
 | Multi-module catalog + symbol resolution (shipped + API) | [TestSeer_Multi_Module_Catalog_Requirements.md](../TestSeer_Multi_Module_Catalog_Requirements.md) · [16-workspace-catalog-config.md](16-workspace-catalog-config.md) |
 | Maven dependency tree + artifact versioning (BL-058 / AC-MVN-4) | [TestSeer_BL058_Maven_Dependency_Tree_Design.md](../TestSeer_BL058_Maven_Dependency_Tree_Design.md) · [AC-MVN-4](../TestSeer_AC_MVN_4_Internal_Artifact_Link_Design.md) · [29-maven-dependency-tree.md](29-maven-dependency-tree.md) |
 | REST conventions, errors, OpenAPI governance | [TestSeer_REST_API_Design.md](../TestSeer_REST_API_Design.md) · plan [P16](../archive/plans/2026-06-12-p16-rest-api-hardening.md) (**R1–R3 shipped**) |

@@ -35,7 +35,7 @@ class VizGraphResponseShapeTest {
                     "post:/orders/create", "REST_INBOUND", "INBOUND", "pdn",
                     "freedom", "EXTERNAL", "POST", "/orders/create",
                     "com.example.orders.OrderController", "createOrder",
-                    "CREATE_ORDER", "OrderController.java", "RULE_PACK", 0.92);
+                    "CREATE_ORDER", "OrderController.java", "RULE_PACK", 0.92, null);
 
             EntryFlowService.DataAccessSummary read = new EntryFlowService.DataAccessSummary(
                     "com.example.orders.OrderController", "createOrder", "READ", "POSTGRES", "orders");

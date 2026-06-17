@@ -32,7 +32,7 @@ class EntryTriggerQueryControllerTest {
                         "freedom:post:/update", "WEBHOOK_INBOUND", "INBOUND", "pdn",
                         "freedom", "EXTERNAL", "POST", "/update",
                         "com.example.FreedomWebhookController", "handleFreedomWebhook",
-                        "PAYOUT_STATUS", "FreedomWebhookController.java", "RULE_PACK", 0.92)));
+                        "PAYOUT_STATUS", "FreedomWebhookController.java", "RULE_PACK", 0.92, null)));
 
         mockMvc.perform(get("/v1/facts/entry-triggers")
                         .param("serviceId", "svc-001")
@@ -106,7 +106,7 @@ class EntryTriggerQueryControllerTest {
                                         "pubsub:test", "PUBSUB_SUBSCRIBE", "INBOUND", "pdn",
                                         "pubsub", "INTERNAL", null, "PDN_S.RIQ_OFFER_EVENT",
                                         "com.example.RiqOfferEventConsumer", "onMessage",
-                                        null, "riq-offer-event", "PUBSUB_LINK", 1.0)))));
+                                        null, "riq-offer-event", "PUBSUB_LINK", 1.0, null)))));
 
         mockMvc.perform(get("/v1/graph/entry-flow/impact")
                         .param("orgId", "quotient")

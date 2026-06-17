@@ -43,6 +43,12 @@ public final class PackagePrefixFilter {
         if (trigger.linkedHandlerFqn() != null && matches(trigger.linkedHandlerFqn(), packagePrefix)) {
             return true;
         }
+        if (trigger.attributes() != null && trigger.attributes().contains("handlerInterfaceFqn")) {
+            // attributes JSON — cheap prefix check without parsing
+            if (trigger.attributes().contains("\"" + packagePrefix)) {
+                return true;
+            }
+        }
         return "KAFKA_SUBSCRIBE".equals(trigger.triggerKind())
                 || "PUBSUB_SUBSCRIBE".equals(trigger.triggerKind());
     }

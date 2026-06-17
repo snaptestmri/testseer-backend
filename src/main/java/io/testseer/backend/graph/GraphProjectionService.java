@@ -8,7 +8,7 @@ import java.util.List;
 @Service
 public class GraphProjectionService {
 
-    private static final String CLASS_EDGE_TYPES = "'DEPENDS_ON', 'INVOKES', 'ROUTES_TO'";
+    private static final String CLASS_EDGE_TYPES = "'DEPENDS_ON', 'INVOKES', 'ROUTES_TO', 'IMPLEMENTS'";
     private static final String METHOD_EDGE_TYPES = "'INVOKES', 'ROUTES_TO'";
     private static final String IMPACT_EDGE_TYPES =
             "'CALLS', 'DEPENDS_ON', 'USES_TYPE', 'INVOKES', 'ROUTES_TO'";

@@ -21,14 +21,17 @@ public class DependencyTreeGraphService {
     private final JdbcClient db;
     private final MavenDependencyQueryService mavenQueryService;
     private final GraphSubgraphHydrator hydrator;
+    private final MavenModuleLookupService moduleLookup;
 
     public DependencyTreeGraphService(
             JdbcClient db,
             MavenDependencyQueryService mavenQueryService,
-            GraphSubgraphHydrator hydrator) {
+            GraphSubgraphHydrator hydrator,
+            MavenModuleLookupService moduleLookup) {
         this.db = db;
         this.mavenQueryService = mavenQueryService;
         this.hydrator = hydrator;
+        this.moduleLookup = moduleLookup;
     }
 
     public DependencyTreeResult buildTree(
@@ -128,22 +131,10 @@ public class DependencyTreeGraphService {
     }
 
     private String resolveRootModule(String serviceId, String commitSha, String modulePath) {
-        if (modulePath != null && !modulePath.isBlank()) {
-            return modulePath;
+        if (modulePath == null || modulePath.isBlank()) {
+            return moduleLookup.resolveDefaultRoot(serviceId, commitSha).orElse(null);
         }
-        return db.sql("""
-                SELECT module_path FROM maven_module_facts
-                WHERE service_id = :serviceId AND commit_sha = :commitSha
-                  AND module_path IS NOT NULL AND trim(module_path) <> ''
-                ORDER BY CASE packaging WHEN 'jar' THEN 0 WHEN 'war' THEN 1 ELSE 2 END,
-                         length(module_path) DESC, module_path
-                LIMIT 1
-                """)
-                .param("serviceId", serviceId)
-                .param("commitSha", commitSha)
-                .query(String.class)
-                .optional()
-                .orElse(null);
+        return moduleLookup.resolveModulePath(serviceId, commitSha, modulePath).orElse(null);
     }
 
     private int countUnresolved(String serviceId, String commitSha, Set<String> modules, String scope) {

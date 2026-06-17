@@ -3,6 +3,7 @@ package io.testseer.backend.query;
 import io.testseer.backend.graph.GraphProjectionService;
 import io.testseer.backend.graph.GraphRoutingService;
 import io.testseer.backend.graph.ReachabilityResult;
+import io.testseer.backend.graph.RestHandlerGraphResolver;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -28,6 +29,7 @@ class GraphQueryControllerTest {
     @MockBean GraphProjectionService graphService;
     @MockBean GraphRoutingService graphRoutingService;
     @MockBean io.testseer.backend.query.flowdiagram.ServiceFlowDiagramComposer flowDiagramComposer;
+    @MockBean RestHandlerGraphResolver restHandlerGraphResolver;
     @MockBean FreshnessResolver freshnessResolver;
     @MockBean CacheService cacheService;
 

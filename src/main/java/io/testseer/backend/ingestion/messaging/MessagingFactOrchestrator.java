@@ -3,16 +3,20 @@ package io.testseer.backend.ingestion.messaging;
 import io.testseer.backend.config.MessagingRulePackLoader;
 import io.testseer.backend.ingestion.FactBatch;
 import io.testseer.backend.ingestion.FactExtractor;
+import io.testseer.backend.ingestion.CrossModuleOutboundAttributor;
 import io.testseer.backend.ingestion.ParsedModel;
 import io.testseer.backend.ingestion.PeripheralDetector;
 import io.testseer.backend.ingestion.catalog.BigQueryDirectExtractor;
 import io.testseer.backend.ingestion.catalog.HandlerAccessLinker;
 import io.testseer.backend.ingestion.catalog.MongoAccessExtractor;
 import io.testseer.backend.ingestion.external.ExternalEndpointLinker;
+import io.testseer.backend.query.HandlerScopeFilter;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class MessagingFactOrchestrator {
@@ -32,6 +36,9 @@ public class MessagingFactOrchestrator {
     private final ExternalEndpointLinker externalEndpointLinker;
     private final HttpPubSubPublishLinker httpPubSubPublishLinker;
     private final MessagingRulePackLoader rulePackLoader;
+    private final CrossModuleOutboundAttributor crossModuleOutboundAttributor;
+    private final KafkaPublishOutboundExtractor kafkaPublishOutboundExtractor;
+    private final PubSubPublishOutboundExtractor pubSubPublishOutboundExtractor;
 
     public MessagingFactOrchestrator(
             FactExtractor factExtractor,
@@ -48,7 +55,10 @@ public class MessagingFactOrchestrator {
             ValidationHintBuilder validationHintBuilder,
             ExternalEndpointLinker externalEndpointLinker,
             HttpPubSubPublishLinker httpPubSubPublishLinker,
-            MessagingRulePackLoader rulePackLoader) {
+            MessagingRulePackLoader rulePackLoader,
+            CrossModuleOutboundAttributor crossModuleOutboundAttributor,
+            KafkaPublishOutboundExtractor kafkaPublishOutboundExtractor,
+            PubSubPublishOutboundExtractor pubSubPublishOutboundExtractor) {
         this.factExtractor = factExtractor;
         this.peripheralDetector = peripheralDetector;
         this.yamlPubSubExtractor = yamlPubSubExtractor;
@@ -64,6 +74,9 @@ public class MessagingFactOrchestrator {
         this.externalEndpointLinker = externalEndpointLinker;
         this.httpPubSubPublishLinker = httpPubSubPublishLinker;
         this.rulePackLoader = rulePackLoader;
+        this.crossModuleOutboundAttributor = crossModuleOutboundAttributor;
+        this.kafkaPublishOutboundExtractor = kafkaPublishOutboundExtractor;
+        this.pubSubPublishOutboundExtractor = pubSubPublishOutboundExtractor;
     }
 
     public IndexingFacts buildFacts(
@@ -87,7 +100,7 @@ public class MessagingFactOrchestrator {
             symbolFacts.addAll(factExtractor.extractEnumFacts(m));
         }
 
-        List<FactBatch.OutboundCallFact> outboundFacts = models.stream()
+        List<FactBatch.OutboundCallFact> javaparserOutbound = models.stream()
                 .flatMap(m -> factExtractor.extractOutboundCallFacts(m).stream())
                 .toList();
         List<FactBatch.PeripheralFact> peripheralFacts = models.stream()
@@ -108,10 +121,27 @@ public class MessagingFactOrchestrator {
                 .map(f -> new ProtoSchemaExtractor.JavaSourceFile(
                         f.path(), f.content(), f.parsedModel().classFqn()))
                 .toList();
+        List<ProtoSchemaExtractor.JavaSourceFile> productionSources = javaSources.stream()
+                .filter(f -> !HandlerScopeFilter.isTestSourcePath(f.path()))
+                .toList();
 
         List<FactBatch.PubSubResourceFact> pubsub = yamlPubSubExtractor.extract(yamlFiles);
         pubsub.addAll(yamlKafkaTopicExtractor.extract(yamlFiles));
         pubsub = messagingClassLinker.linkPubSub(pubsub, javaSources, rulePackLoader.getRulePack());
+
+        Map<String, String> sourceByClassFqn = new LinkedHashMap<>();
+        for (ProtoSchemaExtractor.JavaSourceFile jf : javaSources) {
+            if (jf.classFqn() != null && jf.content() != null) {
+                sourceByClassFqn.put(jf.classFqn(), jf.content());
+            }
+        }
+
+        List<FactBatch.OutboundCallFact> outboundFacts = crossModuleOutboundAttributor.attributeToCallers(
+                models,
+                mergeOutboundFacts(
+                        javaparserOutbound,
+                        kafkaPublishOutboundExtractor.extract(models, pubsub),
+                        pubSubPublishOutboundExtractor.extract(models, pubsub, sourceByClassFqn)));
 
         var protoCatalog = protoSchemaExtractor.extractCatalog(protoFiles);
         List<FactBatch.MessageSchemaFact> schemas =
@@ -119,11 +149,11 @@ public class MessagingFactOrchestrator {
         schemas = messagingClassLinker.linkSchemasToTopics(schemas, pubsub);
 
         List<FactBatch.DataAccessFact> dataAccess = mergeDataAccess(
-                handlerAccessLinker.extract(orgId, serviceId, javaSources),
-                mongoAccessExtractor.extract(orgId, serviceId, javaSources),
-                bigQueryDirectExtractor.extract(orgId, serviceId, javaSources));
+                handlerAccessLinker.extract(orgId, serviceId, productionSources),
+                mongoAccessExtractor.extract(orgId, serviceId, productionSources),
+                bigQueryDirectExtractor.extract(orgId, serviceId, productionSources));
         if (dataAccess.isEmpty()) {
-            dataAccess = dataAccessExtractor.extract(javaSources);
+            dataAccess = dataAccessExtractor.extract(productionSources);
         }
         List<FactBatch.FlowGateFact> gates = flowGateExtractor.extract(models, javaSources, yamlFiles);
         List<FactBatch.ValidationHintFact> hints =
@@ -159,6 +189,33 @@ public class MessagingFactOrchestrator {
             }
         }
         return List.copyOf(byKey.values());
+    }
+
+    private static List<FactBatch.OutboundCallFact> mergeOutboundFacts(
+            List<FactBatch.OutboundCallFact> primary,
+            List<FactBatch.OutboundCallFact> supplemental,
+            List<FactBatch.OutboundCallFact> pubsubOutbound) {
+        java.util.Map<String, FactBatch.OutboundCallFact> merged = new java.util.LinkedHashMap<>();
+        for (FactBatch.OutboundCallFact fact : primary) {
+            merged.putIfAbsent(outboundDedupeKey(fact), fact);
+        }
+        for (FactBatch.OutboundCallFact fact : supplemental) {
+            merged.putIfAbsent(outboundDedupeKey(fact), fact);
+        }
+        for (FactBatch.OutboundCallFact fact : pubsubOutbound) {
+            merged.putIfAbsent(outboundDedupeKey(fact), fact);
+        }
+        return List.copyOf(merged.values());
+    }
+
+    private static List<FactBatch.OutboundCallFact> mergeOutboundFacts(
+            List<FactBatch.OutboundCallFact> primary,
+            List<FactBatch.OutboundCallFact> supplemental) {
+        return mergeOutboundFacts(primary, supplemental, List.of());
+    }
+
+    private static String outboundDedupeKey(FactBatch.OutboundCallFact fact) {
+        return fact.sourceSymbol() + "|" + fact.httpMethod() + "|" + fact.path();
     }
 
     public record SourceFile(String path, String content, ParsedModel parsedModel) {}

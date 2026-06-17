@@ -22,6 +22,7 @@ class ExternalEndpointFactControllerTest {
     @MockBean io.testseer.backend.graph.GraphProjectionService graphService;
     @MockBean io.testseer.backend.graph.GraphRoutingService graphRoutingService;
     @MockBean io.testseer.backend.query.flowdiagram.ServiceFlowDiagramComposer flowDiagramComposer;
+    @MockBean io.testseer.backend.graph.RestHandlerGraphResolver restHandlerGraphResolver;
     @MockBean FreshnessResolver freshnessResolver;
     @MockBean CacheService cacheService;
 

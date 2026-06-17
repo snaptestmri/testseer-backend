@@ -277,7 +277,9 @@ public class MessagingClassLinker {
         if (jf.classFqn() == null || jf.content() == null) return false;
         String simple = simpleName(jf.classFqn());
         return (simple.endsWith("EventProducer") || simple.endsWith("Producer"))
-                && (jf.content().contains("AsyncProducer") || jf.content().contains("KafkaTemplate"));
+                && (jf.content().contains("SyncProducer")
+                || jf.content().contains("AsyncProducer")
+                || jf.content().contains("KafkaTemplate"));
     }
 
     private static String inferKafkaListenerMethod(ProtoSchemaExtractor.JavaSourceFile jf) {

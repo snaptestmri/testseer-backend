@@ -1,8 +1,10 @@
 package io.testseer.backend.ingestion.graph;
 
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.ConstructorDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.Expression;
@@ -136,10 +138,12 @@ public final class MethodCallGraphExtractor {
         for (FieldDeclaration field : cls.getFields()) {
             String injectionAnn = field.getAnnotations().stream()
                     .map(AnnotationExpr::getNameAsString)
-                    .filter(a -> Set.of("Autowired", "Resource", "Inject").contains(a))
+                    .filter(a -> Set.of("Autowired", "Resource", "Inject", "Qualifier").contains(a))
                     .findFirst()
                     .orElse(null);
-            if (injectionAnn == null) {
+            String declaredType = field.getElementType().asString();
+            boolean producerField = isKafkaProducerType(declaredType);
+            if (injectionAnn == null && !producerField) {
                 continue;
             }
             String beanName = field.getAnnotations().stream()
@@ -155,16 +159,69 @@ public final class MethodCallGraphExtractor {
                         .orElse(null);
             }
 
-            String declaredType = field.getElementType().asString();
             for (VariableDeclarator var : field.getVariables()) {
                 String key = var.getNameAsString() + "|" + declaredType;
                 if (seen.add(key)) {
                     result.add(new ParsedModel.FieldInjectionDef(
-                            var.getNameAsString(), declaredType, beanName, injectionAnn));
+                            var.getNameAsString(),
+                            declaredType,
+                            beanName,
+                            injectionAnn != null ? injectionAnn : "FIELD"));
+                }
+            }
+        }
+
+        for (ConstructorDeclaration ctor : cls.getConstructors()) {
+            for (Parameter param : ctor.getParameters()) {
+                String declaredType = param.getType().asString();
+                String beanName = param.getAnnotations().stream()
+                        .filter(a -> a.getNameAsString().equals("Qualifier"))
+                        .findFirst()
+                        .map(MethodCallGraphExtractor::annotationMember)
+                        .orElse(null);
+                String key = param.getNameAsString() + "|" + declaredType;
+                if (seen.add(key)) {
+                    result.add(new ParsedModel.FieldInjectionDef(
+                            param.getNameAsString(), declaredType, beanName, "CONSTRUCTOR"));
+                }
+            }
+        }
+
+        boolean allArgsConstructor = hasClassAnnotation(cls, "AllArgsConstructor");
+        boolean requiredArgsConstructor = hasClassAnnotation(cls, "RequiredArgsConstructor");
+        if (allArgsConstructor || requiredArgsConstructor) {
+            for (FieldDeclaration field : cls.getFields()) {
+                if (field.isStatic()) {
+                    continue;
+                }
+                String declaredType = field.getElementType().asString();
+                for (VariableDeclarator var : field.getVariables()) {
+                    if (requiredArgsConstructor && !allArgsConstructor && !field.isFinal()) {
+                        continue;
+                    }
+                    String key = var.getNameAsString() + "|" + declaredType;
+                    if (seen.add(key)) {
+                        result.add(new ParsedModel.FieldInjectionDef(
+                                var.getNameAsString(), declaredType, null, "LOMBOK_CONSTRUCTOR"));
+                    }
                 }
             }
         }
         return result;
+    }
+
+    private static boolean hasClassAnnotation(ClassOrInterfaceDeclaration cls, String simpleName) {
+        return cls.getAnnotations().stream()
+                .anyMatch(a -> simpleName.equals(a.getNameAsString()));
+    }
+
+    public static boolean isKafkaProducerType(String declaredType) {
+        if (declaredType == null || declaredType.isBlank()) {
+            return false;
+        }
+        return declaredType.contains("SyncProducer")
+                || declaredType.contains("AsyncProducer")
+                || declaredType.contains("KafkaTemplate");
     }
 
     static String annotationMember(AnnotationExpr ann) {

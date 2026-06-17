@@ -1,6 +1,7 @@
 package io.testseer.backend.query.flowdiagram;
 
 import io.testseer.backend.graph.GraphNodeIds;
+import io.testseer.backend.graph.RestHandlerGraphResolver;
 import io.testseer.backend.query.EntryFlowService;
 import org.springframework.stereotype.Component;
 
@@ -11,10 +12,16 @@ import java.util.Optional;
 @Component
 public class FlowDiagramAnchorResolver {
 
-    private final EntryFlowService entryFlowService;
+    private static final String REST_INBOUND = "REST_INBOUND";
 
-    public FlowDiagramAnchorResolver(EntryFlowService entryFlowService) {
+    private final EntryFlowService entryFlowService;
+    private final RestHandlerGraphResolver restHandlerGraphResolver;
+
+    public FlowDiagramAnchorResolver(
+            EntryFlowService entryFlowService,
+            RestHandlerGraphResolver restHandlerGraphResolver) {
         this.entryFlowService = entryFlowService;
+        this.restHandlerGraphResolver = restHandlerGraphResolver;
     }
 
     public record ResolvedAnchor(
@@ -23,10 +30,42 @@ public class FlowDiagramAnchorResolver {
             EntryFlowService.EntryTriggerView trigger
     ) {}
 
-    public ResolvedAnchor resolve(String orgId, String serviceId, String anchorParam) {
+    public ResolvedAnchor resolve(String orgId, String serviceId, String anchorParam, String packagePrefix) {
         if (anchorParam == null || anchorParam.isBlank()) {
-            throw new IllegalArgumentException("anchor is required");
+            return resolveAutoFromPackagePrefix(orgId, serviceId, packagePrefix);
         }
+        return resolveExplicit(orgId, serviceId, anchorParam, false);
+    }
+
+    private ResolvedAnchor resolveAutoFromPackagePrefix(String orgId, String serviceId, String packagePrefix) {
+        if (packagePrefix == null || packagePrefix.isBlank()) {
+            throw new IllegalArgumentException(
+                    "anchor is required when packagePrefix is omitted "
+                            + "(use triggerId:|handlerFqn:|symbolFqn:|nodeId:)");
+        }
+        List<EntryFlowService.EntryTriggerView> triggers =
+                entryFlowService.queryTriggers(
+                        serviceId, null, null, null, null,
+                        null, null, null, packagePrefix, false);
+        Optional<EntryFlowService.EntryTriggerView> rest = triggers.stream()
+                .filter(t -> REST_INBOUND.equals(t.triggerKind()))
+                .filter(t -> t.pathPattern() != null && !"/".equals(t.pathPattern()))
+                .findFirst();
+        if (rest.isEmpty()) {
+            rest = triggers.stream()
+                    .filter(t -> REST_INBOUND.equals(t.triggerKind()))
+                    .findFirst();
+        }
+        if (rest.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "No REST_INBOUND entry trigger for packagePrefix=" + packagePrefix
+                            + "; provide anchor=triggerId:... explicitly");
+        }
+        ResolvedAnchor resolved = resolveTrigger(orgId, serviceId, rest.get().triggerId(), true);
+        return resolved;
+    }
+
+    private ResolvedAnchor resolveExplicit(String orgId, String serviceId, String anchorParam, boolean autoSelected) {
         int colon = anchorParam.indexOf(':');
         if (colon <= 0) {
             throw new IllegalArgumentException("anchor must be triggerId:|handlerFqn:|symbolFqn:|nodeId:");
@@ -34,15 +73,16 @@ public class FlowDiagramAnchorResolver {
         String kind = anchorParam.substring(0, colon).trim();
         String value = anchorParam.substring(colon + 1).trim();
         return switch (kind) {
-            case "triggerId" -> resolveTrigger(orgId, serviceId, value);
-            case "handlerFqn" -> resolveHandler(serviceId, value);
-            case "symbolFqn" -> resolveSymbol(serviceId, value);
-            case "nodeId" -> resolveNodeId(value);
+            case "triggerId" -> resolveTrigger(orgId, serviceId, value, autoSelected);
+            case "handlerFqn" -> resolveHandler(serviceId, value, autoSelected);
+            case "symbolFqn" -> resolveSymbol(serviceId, value, autoSelected);
+            case "nodeId" -> resolveNodeId(value, autoSelected);
             default -> throw new IllegalArgumentException("Unknown anchor kind: " + kind);
         };
     }
 
-    private ResolvedAnchor resolveTrigger(String orgId, String serviceId, String triggerId) {
+    private ResolvedAnchor resolveTrigger(
+            String orgId, String serviceId, String triggerId, boolean autoSelected) {
         EntryFlowService.EntryTriggerView trigger = findTrigger(serviceId, triggerId)
                 .orElseThrow(() -> new IllegalArgumentException("trigger not found: " + triggerId));
 
@@ -65,32 +105,36 @@ public class FlowDiagramAnchorResolver {
                 trigger.triggerId(),
                 handlerDisplay,
                 trigger.linkedHandlerFqn(),
-                startIds.isEmpty() ? null : startIds.get(0));
+                startIds.isEmpty() ? null : startIds.get(0),
+                autoSelected);
 
         return new ResolvedAnchor(anchor, startIds, trigger);
     }
 
-    private ResolvedAnchor resolveHandler(String serviceId, String handlerFqn) {
+    private ResolvedAnchor resolveHandler(String serviceId, String handlerFqn, boolean autoSelected) {
         EntryFlowService.ParsedHandler parsed = EntryFlowService.parseHandlerFqn(handlerFqn);
+        String resolvedClassFqn = restHandlerGraphResolver.resolveImplementationClassFqn(
+                serviceId, parsed.classFqn());
         List<String> startIds = new ArrayList<>();
         if (parsed.method() != null) {
-            startIds.add(GraphNodeIds.methodNode(serviceId, parsed.classFqn(), parsed.method()));
+            startIds.add(GraphNodeIds.methodNode(serviceId, resolvedClassFqn, parsed.method()));
         }
-        startIds.add(GraphNodeIds.classNode(serviceId, parsed.classFqn()));
+        startIds.add(GraphNodeIds.classNode(serviceId, resolvedClassFqn));
 
         FlowDiagramModels.FlowDiagramAnchor anchor = new FlowDiagramModels.FlowDiagramAnchor(
                 "HANDLER",
                 null,
                 handlerFqn,
                 parsed.method() != null
-                        ? parsed.classFqn() + "#" + parsed.method()
-                        : parsed.classFqn(),
-                startIds.get(0));
+                        ? resolvedClassFqn + "#" + parsed.method()
+                        : resolvedClassFqn,
+                startIds.get(0),
+                autoSelected);
 
         return new ResolvedAnchor(anchor, startIds, null);
     }
 
-    private ResolvedAnchor resolveSymbol(String serviceId, String symbolFqn) {
+    private ResolvedAnchor resolveSymbol(String serviceId, String symbolFqn, boolean autoSelected) {
         List<String> startIds = new ArrayList<>();
         if (symbolFqn.contains("#")) {
             int hash = symbolFqn.indexOf('#');
@@ -103,13 +147,13 @@ public class FlowDiagramAnchorResolver {
         }
 
         FlowDiagramModels.FlowDiagramAnchor anchor = new FlowDiagramModels.FlowDiagramAnchor(
-                "SYMBOL", null, null, symbolFqn, startIds.get(0));
+                "SYMBOL", null, null, symbolFqn, startIds.get(0), autoSelected);
         return new ResolvedAnchor(anchor, startIds, null);
     }
 
-    private ResolvedAnchor resolveNodeId(String nodeId) {
+    private ResolvedAnchor resolveNodeId(String nodeId, boolean autoSelected) {
         FlowDiagramModels.FlowDiagramAnchor anchor = new FlowDiagramModels.FlowDiagramAnchor(
-                "NODE", null, null, null, nodeId);
+                "NODE", null, null, null, nodeId, autoSelected);
         return new ResolvedAnchor(anchor, List.of(nodeId), null);
     }
 

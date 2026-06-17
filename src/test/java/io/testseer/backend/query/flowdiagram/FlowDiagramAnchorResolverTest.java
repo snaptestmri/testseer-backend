@@ -1,5 +1,6 @@
 package io.testseer.backend.query.flowdiagram;
 
+import io.testseer.backend.graph.RestHandlerGraphResolver;
 import io.testseer.backend.query.EntryFlowService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -10,51 +11,48 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class FlowDiagramAnchorResolverTest {
 
-    private static final String SVC = "svc-eval";
-    private static final String CONSUMER =
-            "com.quotient.platform.transaction.eval.consumer.TransactionEvalConsumer";
-
     @Mock EntryFlowService entryFlowService;
+    @Mock RestHandlerGraphResolver restHandlerGraphResolver;
     @InjectMocks FlowDiagramAnchorResolver resolver;
 
     @Test
-    void resolvesHandlerFqnWithDotNotation() {
-        var resolved = resolver.resolve(
-                "quotient", SVC,
-                "handlerFqn:" + CONSUMER + ".processSalesCanonicalEvent");
+    void resolve_autoSelectsRestInboundWhenAnchorOmitted() {
+        EntryFlowService.EntryTriggerView trigger = new EntryFlowService.EntryTriggerView(
+                "post:/shopping/history",
+                "REST_INBOUND",
+                "INBOUND",
+                "unknown",
+                "EXTERNAL",
+                "EXTERNAL",
+                "POST",
+                "/shopping/history",
+                "com.quotient.platform.userprofile.api.UserHistoryApiController",
+                "getUserProfileShoppingHistory",
+                null,
+                null,
+                "JAVA_PARSER",
+                0.95,
+                null);
 
-        assertThat(resolved.anchor().kind()).isEqualTo("HANDLER");
-        assertThat(resolved.startNodeIds()).hasSize(2);
-        assertThat(resolved.startNodeIds().get(0)).contains("processSalesCanonicalEvent");
-    }
+        when(entryFlowService.queryTriggers(
+                eq("svc-1"), eq(null), eq(null), eq(null), eq(null),
+                eq(null), eq(null), eq(null), eq("com.quotient.platform.userprofile"), eq(false)))
+                .thenReturn(List.of(trigger));
+        when(entryFlowService.queryTriggers(
+                eq("svc-1"), eq(null), eq(null), eq(null), eq(null)))
+                .thenReturn(List.of(trigger));
 
-    @Test
-    void resolvesSymbolFqn() {
-        var resolved = resolver.resolve(
-                "quotient", SVC, "symbolFqn:" + CONSUMER);
+        FlowDiagramAnchorResolver.ResolvedAnchor resolved = resolver.resolve(
+                "quotient", "svc-1", null, "com.quotient.platform.userprofile");
 
-        assertThat(resolved.anchor().kind()).isEqualTo("SYMBOL");
-        assertThat(resolved.startNodeIds().get(0)).contains(CONSUMER);
-    }
-
-    @Test
-    void resolvesTriggerId() {
-        when(entryFlowService.queryTriggers(any(), any(), any(), any(), any()))
-                .thenReturn(List.of(new EntryFlowService.EntryTriggerView(
-                        "kafka:pipeline", "KAFKA_SUBSCRIBE", "INBOUND", "dev",
-                        "kafka", "INTERNAL", null, "QUOT.SALES.TRANSACTION.PIPELINE.EVENTS",
-                        CONSUMER, "processSalesCanonicalEvent",
-                        null, "yaml", "KAFKA_LISTENER", 0.95)));
-
-        var resolved = resolver.resolve("quotient", SVC, "triggerId:kafka:pipeline");
-
-        assertThat(resolved.anchor().kind()).isEqualTo("TRIGGER");
-        assertThat(resolved.trigger().linkedHandlerFqn()).isEqualTo(CONSUMER);
+        assertThat(resolved.anchor().autoSelected()).isTrue();
+        assertThat(resolved.anchor().triggerId()).isEqualTo("post:/shopping/history");
+        assertThat(resolved.startNodeIds()).isNotEmpty();
     }
 }

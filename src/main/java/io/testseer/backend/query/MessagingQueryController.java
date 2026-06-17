@@ -91,10 +91,13 @@ public class MessagingQueryController {
     @Operation(summary = "Data access facts along event handlers (C-P3)")
     @GetMapping("/facts/data-access")
     public ResponseEntity<ResponseEnvelope<List<MessagingFlowService.DataAccessView>>> getDataAccess(
-            @RequestParam String serviceId) {
+            @RequestParam String serviceId,
+            @RequestParam(required = false) String packagePrefix,
+            @RequestParam(defaultValue = "true") boolean excludeTestHandlers) {
 
         FreshnessStatus status = freshnessResolver.resolve(serviceId, staleThresholdMinutes);
-        return FreshnessHttp.respond(status, flowService.queryDataAccess(serviceId));
+        return FreshnessHttp.respond(status,
+                flowService.queryDataAccess(serviceId, packagePrefix, excludeTestHandlers));
     }
 
     @Operation(summary = "Flow gate and config facts (C-P6)")
@@ -103,11 +106,12 @@ public class MessagingQueryController {
             @RequestParam String serviceId,
             @RequestParam(required = false) String env,
             @RequestParam(required = false) String flowStep,
+            @RequestParam(required = false) String packagePrefix,
             @RequestParam(defaultValue = "false") boolean refreshLive) {
 
         FreshnessStatus status = freshnessResolver.resolve(serviceId, staleThresholdMinutes);
         List<MessagingFlowService.FlowGateView> gates =
-                flowService.queryGatesWithLive(serviceId, env, refreshLive);
+                flowService.queryGatesWithLive(serviceId, env, refreshLive, packagePrefix);
         if (flowStep != null && !flowStep.isBlank()) {
             gates = gates.stream().filter(g -> flowStep.equals(g.guardedFlowStep())).toList();
         }

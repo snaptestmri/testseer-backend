@@ -80,7 +80,7 @@ public class EntryFlowService {
         StringBuilder sql = new StringBuilder("""
                 SELECT trigger_id, trigger_kind, direction, env_lane, actor, boundary,
                        http_method, path_pattern, linked_handler_fqn, linked_method, flow_step,
-                       source_ref, evidence_source, confidence
+                       source_ref, evidence_source, confidence, attributes
                 FROM entry_trigger_facts
                 WHERE service_id = :svcId
                 """);
@@ -189,7 +189,7 @@ public class EntryFlowService {
         StringBuilder sql = new StringBuilder("""
                 SELECT t.trigger_id, t.trigger_kind, t.direction, t.env_lane, t.actor, t.boundary,
                        t.http_method, t.path_pattern, t.linked_handler_fqn, t.linked_method, t.flow_step,
-                       t.source_ref, t.evidence_source, t.confidence,
+                       t.source_ref, t.evidence_source, t.confidence, t.attributes,
                        t.service_id, sr.repo, sr.service_name
                 FROM entry_trigger_facts t
                 JOIN service_registry sr ON sr.service_id = t.service_id
@@ -204,7 +204,13 @@ public class EntryFlowService {
             sql.append(" AND t.service_id = :svcId");
         }
         if (tier == MatchTier.EXACT) {
-            sql.append(" AND t.linked_handler_fqn = :handlerClass");
+            sql.append("""
+                 AND (
+                   t.linked_handler_fqn = :handlerClass
+                   OR t.attributes->>'handlerInterfaceFqn' = :handlerClass
+                   OR t.attributes->>'handlerImplFqn' = :handlerClass
+                 )
+                """);
             if (handler.method() != null && !handler.method().isBlank()) {
                 sql.append(" AND t.linked_method = :handlerMethod");
             }
@@ -308,7 +314,8 @@ public class EntryFlowService {
                 rs.getString("flow_step"),
                 rs.getString("source_ref"),
                 rs.getString("evidence_source"),
-                rs.getDouble("confidence")
+                rs.getDouble("confidence"),
+                rs.getString("attributes")
         );
     }
 
@@ -518,7 +525,8 @@ public class EntryFlowService {
             String flowStep,
             String sourceRef,
             String evidenceSource,
-            double confidence
+            double confidence,
+            String attributes
     ) {}
 
     public record EntryTriggerImpactHit(

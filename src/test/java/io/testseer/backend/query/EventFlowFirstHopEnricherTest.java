@@ -78,7 +78,7 @@ class EventFlowFirstHopEnricherTest {
                 "pubsub:pdn_s.riq_offer_event:com.example.riqoffereventconsumer",
                 "PUBSUB_SUBSCRIBE", "INBOUND", "pdn", "pubsub", "INTERNAL",
                 null, "PDN_S.RIQ_OFFER_EVENT", HANDLER, "onMessage",
-                null, "riq-offer-event", "PUBSUB_LINK", 1.0);
+                null, "riq-offer-event", "PUBSUB_LINK", 1.0, null);
     }
 
     private static MessagingFlowService.PubSubOrgView pubSub(String serviceId, String handler) {

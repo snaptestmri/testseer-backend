@@ -24,7 +24,8 @@ class EntryTriggerScopeFilterTest {
                 null,
                 "evaluation-consumers/transaction-eval-consumer/src/main/java/com/example/TransactionEvalConsumer.java",
                 "JAVA_ANNOTATION",
-                0.95
+                0.95,
+                null
         );
 
         boolean matches = EntryTriggerScopeFilter.matches(
@@ -51,7 +52,8 @@ class EntryTriggerScopeFilterTest {
                 null,
                 "evaluation-jobs/stc-retry-job/kubernetes-manifests/dev/stc-retry-batch-job.cronjob.yaml",
                 "K8S_MANIFEST",
-                0.90
+                0.90,
+                null
         );
 
         List<EntryFlowService.EntryTriggerView> filtered = EntryTriggerScopeFilter.filter(

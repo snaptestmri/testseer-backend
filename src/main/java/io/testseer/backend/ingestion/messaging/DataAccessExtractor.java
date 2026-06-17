@@ -3,6 +3,7 @@ package io.testseer.backend.ingestion.messaging;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.testseer.backend.ingestion.FactBatch;
+import io.testseer.backend.ingestion.catalog.StoreType;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -40,7 +41,7 @@ public class DataAccessExtractor {
                 if (!seen.add(key)) continue;
 
                 results.add(FactBatch.DataAccessFact.touchpoint(
-                        file.classFqn(), inferHandlerMethod(file.content()), op, "MARIADB",
+                        file.classFqn(), inferHandlerMethod(file.content()), op, inferStoreType(repo, file.content()),
                         table, repo, method, correlationKeys(method), null,
                         "JAVA_AST", 0.85
                 ));
@@ -78,6 +79,33 @@ public class DataAccessExtractor {
             sb.append(Character.toLowerCase(c));
         }
         return sb.toString();
+    }
+
+    private String inferStoreType(String repo, String content) {
+        String lowerRepo = repo.toLowerCase(Locale.ROOT);
+        if (lowerRepo.contains("mongo")) return StoreType.MONGODB.dbValue();
+        if (lowerRepo.contains("cassandra") || lowerRepo.contains("nosql")) return StoreType.CASSANDRA.dbValue();
+        if (lowerRepo.contains("bigquery") || lowerRepo.contains("bq")) return StoreType.BIGQUERY.dbValue();
+        Matcher fieldType = Pattern.compile(
+                "([\\w.]+)\\s+" + Pattern.quote(repo) + "\\s*;").matcher(content);
+        if (fieldType.find()) {
+            String typeName = fieldType.group(1);
+            String lowerType = typeName.toLowerCase(Locale.ROOT);
+            if (lowerType.contains("nosql") || lowerType.contains("cassandra")) {
+                return StoreType.CASSANDRA.dbValue();
+            }
+            if (lowerType.contains("mongo")) return StoreType.MONGODB.dbValue();
+            if (lowerType.contains("bigquery")) return StoreType.BIGQUERY.dbValue();
+            Matcher importLine = Pattern.compile(
+                    "import\\s+([\\w.]*" + Pattern.quote(typeName) + ")\\s*;").matcher(content);
+            if (importLine.find()) {
+                StoreType hinted = StoreType.fromPackageHint(importLine.group(1));
+                if (hinted != StoreType.UNKNOWN) {
+                    return hinted.dbValue();
+                }
+            }
+        }
+        return StoreType.MARIADB.dbValue();
     }
 
     private String inferHandlerMethod(String content) {

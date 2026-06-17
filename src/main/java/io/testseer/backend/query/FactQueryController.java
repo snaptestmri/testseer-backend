@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -127,7 +128,7 @@ public class FactQueryController {
             String operation,
             String httpMethod,
             String urlTemplate,
-            String urlResolved,
+            @JsonAlias("resolvedUrl") String urlResolved,
             String envLane,
             String boundary,
             String configKey,

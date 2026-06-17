@@ -9,6 +9,7 @@ import io.testseer.backend.graph.GraphProjectionService;
 import io.testseer.backend.graph.GraphNodeIds;
 import io.testseer.backend.graph.GraphRoutingService;
 import io.testseer.backend.graph.ReachabilityResult;
+import io.testseer.backend.graph.RestHandlerGraphResolver;
 import io.testseer.backend.query.flowdiagram.FlowDiagramModels;
 import io.testseer.backend.query.flowdiagram.ServiceFlowDiagramComposer;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,6 +24,7 @@ public class GraphQueryController {
     private final GraphProjectionService graphService;
     private final GraphRoutingService routingService;
     private final ServiceFlowDiagramComposer flowDiagramComposer;
+    private final RestHandlerGraphResolver restHandlerGraphResolver;
     private final FreshnessResolver freshnessResolver;
     private final CacheService cache;
     private final int staleThresholdMinutes;
@@ -30,12 +32,14 @@ public class GraphQueryController {
     public GraphQueryController(GraphProjectionService graphService,
                                 GraphRoutingService routingService,
                                 ServiceFlowDiagramComposer flowDiagramComposer,
+                                RestHandlerGraphResolver restHandlerGraphResolver,
                                 FreshnessResolver freshnessResolver,
                                 CacheService cache,
                                 @Value("${testseer.stale-threshold-minutes:60}") int staleThresholdMinutes) {
         this.graphService = graphService;
         this.routingService = routingService;
         this.flowDiagramComposer = flowDiagramComposer;
+        this.restHandlerGraphResolver = restHandlerGraphResolver;
         this.freshnessResolver = freshnessResolver;
         this.cache = cache;
         this.staleThresholdMinutes = staleThresholdMinutes;
@@ -74,7 +78,8 @@ public class GraphQueryController {
             return ResponseEntity.status(202).body(ResponseEnvelope.indexing(null));
         }
 
-        String resolvedNodeId = resolveReachabilityStartNode(serviceId, type, nodeId, symbolFqn, methodName);
+        String resolvedNodeId = resolveReachabilityStartNode(
+                serviceId, type, nodeId, symbolFqn, methodName, restHandlerGraphResolver);
         if (resolvedNodeId == null) {
             return ResponseEntity.badRequest().build();
         }
@@ -122,8 +127,9 @@ public class GraphQueryController {
     @GetMapping("/flow-diagram")
     public ResponseEntity<ResponseEnvelope<FlowDiagramModels.FlowDiagramResult>> flowDiagram(
             @Parameter(description = "Service identifier", required = true) @RequestParam String serviceId,
-            @Parameter(description = "Anchor: triggerId:|handlerFqn:|symbolFqn:|nodeId:", required = true)
-            @RequestParam String anchor,
+            @Parameter(description = "Anchor: triggerId:|handlerFqn:|symbolFqn:|nodeId: "
+                    + "(optional when packagePrefix is set — first REST_INBOUND trigger is used)")
+            @RequestParam(required = false) String anchor,
             @Parameter(description = "Organisation ID") @RequestParam(defaultValue = "quotient") String orgId,
             @Parameter(description = "Java package prefix filter") @RequestParam(required = false) String packagePrefix,
             @Parameter(description = "Transitive expansion depth") @RequestParam(defaultValue = "6") int depth,
@@ -155,20 +161,43 @@ public class GraphQueryController {
     }
 
     static String resolveReachabilityStartNode(
-            String serviceId, String type, String nodeId, String symbolFqn, String methodName) {
+            String serviceId,
+            String type,
+            String nodeId,
+            String symbolFqn,
+            String methodName,
+            RestHandlerGraphResolver restHandlerGraphResolver) {
         if (nodeId != null && !nodeId.isBlank()) {
             return nodeId;
         }
         return switch (type) {
             case "service" -> GraphNodeIds.serviceNode(serviceId);
-            case "class" -> symbolFqn != null && !symbolFqn.isBlank()
-                    ? GraphNodeIds.classNode(serviceId, symbolFqn)
-                    : null;
-            case "method" -> symbolFqn != null && !symbolFqn.isBlank() && methodName != null && !methodName.isBlank()
-                    ? GraphNodeIds.methodNode(serviceId, symbolFqn, methodName)
-                    : null;
+            case "class" -> {
+                if (symbolFqn == null || symbolFqn.isBlank()) {
+                    yield null;
+                }
+                String resolvedFqn = restHandlerGraphResolver != null
+                        ? restHandlerGraphResolver.resolveImplementationClassFqn(serviceId, symbolFqn)
+                        : symbolFqn;
+                yield GraphNodeIds.classNode(serviceId, resolvedFqn);
+            }
+            case "method" -> {
+                if (symbolFqn == null || symbolFqn.isBlank() || methodName == null || methodName.isBlank()) {
+                    yield null;
+                }
+                String resolvedFqn = restHandlerGraphResolver != null
+                        ? restHandlerGraphResolver.resolveImplementationClassFqn(serviceId, symbolFqn)
+                        : symbolFqn;
+                yield GraphNodeIds.methodNode(serviceId, resolvedFqn, methodName);
+            }
             default -> GraphNodeIds.serviceNode(serviceId);
         };
+    }
+
+    /** Test / legacy overload without interface resolution. */
+    static String resolveReachabilityStartNode(
+            String serviceId, String type, String nodeId, String symbolFqn, String methodName) {
+        return resolveReachabilityStartNode(serviceId, type, nodeId, symbolFqn, methodName, null);
     }
 
     @Operation(summary = "Reverse reachability (impact analysis)",

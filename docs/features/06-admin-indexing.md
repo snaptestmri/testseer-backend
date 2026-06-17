@@ -67,7 +67,7 @@ Or shortcut: `DELETE /admin/index/{serviceId}`
 |-------|---------|
 | `SERVICE` | All fact tables, graph nodes/edges for service, Mongo `parsed_models`, cache invalidate |
 | `MESSAGING` | V8 tables only (pubsub, schema, data-access, gates, validation hints) |
-| `ORG` | All facts + graph for org; optional registry wipe |
+| `ORG` | All facts + graph for org; optional registry wipe; Redis cache invalidate (org-wide) |
 
 ## REST summary
 

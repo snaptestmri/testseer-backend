@@ -52,4 +52,26 @@ class DataAccessExtractorTest {
                 "READ".equals(f.operation())
                         && "notification_tracking".equals(f.tableOrEntity()));
     }
+
+    @Test
+    void extract_detectsCassandraRepoFromFieldType() {
+        String java = """
+                package com.example;
+                import com.quotient.platform.data.nosql.riq.digitalrebates.repo.UserRewardTransactionRepo;
+                public class UserRewardTransactionDaoImpl {
+                  private UserRewardTransactionRepo userRewardTransactionRepo;
+                  public void load() {
+                    userRewardTransactionRepo.findAllByCiUserId(id);
+                  }
+                }
+                """;
+        var files = List.of(new ProtoSchemaExtractor.JavaSourceFile(
+                "UserRewardTransactionDaoImpl.java", java,
+                "com.example.UserRewardTransactionDaoImpl"));
+
+        List<FactBatch.DataAccessFact> facts = extractor.extract(files);
+
+        assertThat(facts).anyMatch(f ->
+                "CASSANDRA".equals(f.storeType()) && "READ".equals(f.operation()));
+    }
 }

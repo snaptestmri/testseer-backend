@@ -70,4 +70,18 @@ class IndexClearServiceTest {
         assertThat(resp.deletedCounts()).containsKey("pubsubResourceFacts");
         assertThat(resp.deletedCounts()).doesNotContainKey("symbolFacts");
     }
+
+    @Test
+    void clearOrg_invalidatesOrgCache() {
+        when(db.sql(anyString())).thenReturn(spec);
+        when(spec.param(anyString(), any())).thenReturn(spec);
+        when(spec.update()).thenReturn(1);
+        when(mongo.remove(any(Query.class), eq("parsed_models"))).thenReturn(
+                com.mongodb.client.result.DeleteResult.acknowledged(1));
+
+        IndexClearResponse resp = service.clearOrg("quotient", true);
+
+        assertThat(resp.scope()).isEqualTo("ORG");
+        verify(cacheService).invalidateOrg("quotient");
+    }
 }

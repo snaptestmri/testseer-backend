@@ -42,4 +42,9 @@ public record GraphEdge(
     public static GraphEdge wires(String from, String to) {
         return new GraphEdge(from, to, "WIRES", 0.88, "component-scan");
     }
+
+    /** TRG-15 / GRP-19: interface API → {@code @RestController} implementation. */
+    public static GraphEdge implementsEdge(String interfaceNode, String implNode) {
+        return new GraphEdge(interfaceNode, implNode, "IMPLEMENTS", 0.95, "rest-impl-linker");
+    }
 }

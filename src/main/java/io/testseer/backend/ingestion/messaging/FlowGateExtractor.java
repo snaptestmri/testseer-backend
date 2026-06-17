@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -29,6 +30,12 @@ public class FlowGateExtractor {
             Pattern.compile("isConfigEnabled\\s*\\(\\s*[^,]+,\\s*SystemConfigKeys\\.([A-Za-z0-9_]+)\\.(?:name|toString)\\(\\)\\s*\\)");
     private static final Pattern CONFIG_ENABLED_GLOBAL =
             Pattern.compile("isConfigEnabled\\s*\\(\\s*SystemConfigKeys\\.([A-Za-z0-9_]+)\\.(?:name|toString)\\(\\)\\s*\\)");
+    private static final Pattern CONFIG_STRING_VALUE_OF =
+            Pattern.compile("isConfigEnabled\\s*\\(\\s*String\\.valueOf\\s*\\(\\s*SystemConfigKeys\\.([A-Za-z0-9_]+)\\s*\\)\\s*\\)");
+    private static final Pattern CONFIG_ENABLED_PARTNER_BARE =
+            Pattern.compile("isConfigEnabled\\s*\\([^,]+,\\s*([A-Za-z0-9_]+)\\.(?:name|toString)\\(\\)\\s*\\)");
+    private static final Pattern STATIC_SYSTEM_CONFIG_IMPORT =
+            Pattern.compile("import\\s+static\\s+[\\w.]*SystemConfigKeys\\.([A-Za-z0-9_]+)\\s*;");
     private static final Pattern CONFIG_BANNER_PARTNER =
             Pattern.compile("isBannerOrPartnerLevelSystemConfigEnabled\\s*\\([^,]+,\\s*[^,]+,\\s*SystemConfigKeys\\.([A-Za-z0-9_]+)\\.(?:name|toString)\\(\\)");
     private static final Pattern CONFIG_READ_PARTNER =
@@ -225,6 +232,7 @@ public class FlowGateExtractor {
     private List<FactBatch.FlowGateFact> extractSystemConfigGates(String fqn, String content) {
         List<FactBatch.FlowGateFact> gates = new ArrayList<>();
         Set<String> seen = new HashSet<>();
+        Set<String> staticImportedKeys = parseStaticSystemConfigImports(content);
 
         Matcher findByKey = SYSTEM_CONFIG_FIND_BY_KEY.matcher(content);
         while (findByKey.find()) {
@@ -267,6 +275,51 @@ public class FlowGateExtractor {
                         "system_configuration." + key + " must be populated",
                         0.87)));
 
+        extractStaticImportPartnerGates(fqn, content, staticImportedKeys, seen).forEach(gates::add);
+
+        Matcher stringValueOf = CONFIG_STRING_VALUE_OF.matcher(content);
+        while (stringValueOf.find()) {
+            String key = stringValueOf.group(1);
+            if (seen.add(key)) {
+                gates.add(systemConfigGate(fqn, key,
+                        "true", "EQ", "SKIP",
+                        "system_configuration." + key + " must be enabled",
+                        0.90));
+            }
+        }
+
+        return gates;
+    }
+
+    private static Set<String> parseStaticSystemConfigImports(String content) {
+        Set<String> keys = new LinkedHashSet<>();
+        Matcher matcher = STATIC_SYSTEM_CONFIG_IMPORT.matcher(content);
+        while (matcher.find()) {
+            keys.add(matcher.group(1));
+        }
+        return keys;
+    }
+
+    private List<FactBatch.FlowGateFact> extractStaticImportPartnerGates(
+            String fqn, String content, Set<String> staticImportedKeys, Set<String> seen) {
+        List<FactBatch.FlowGateFact> gates = new ArrayList<>();
+        if (staticImportedKeys.isEmpty()) {
+            return gates;
+        }
+        Matcher matcher = CONFIG_ENABLED_PARTNER_BARE.matcher(content);
+        while (matcher.find()) {
+            String constant = matcher.group(1);
+            if (!staticImportedKeys.contains(constant)) {
+                continue;
+            }
+            if (!seen.add(constant)) {
+                continue;
+            }
+            gates.add(systemConfigGate(fqn, constant,
+                    "true", "EQ", "SKIP",
+                    "system_configuration." + constant + " must be enabled for partner",
+                    0.92));
+        }
         return gates;
     }
 

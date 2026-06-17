@@ -57,12 +57,26 @@ public class CacheService {
     }
 
     public void invalidate(String orgId, String repo, String serviceId) {
-        String pattern = "testseer:" + orgId + ":" + repo + ":" + serviceId + ":*";
-        Set<String> keys = redis.keys(pattern);
-        if (keys != null && !keys.isEmpty()) {
-            redis.delete(keys);
-            log.debug("Invalidated {} cache keys for {}/{}/{}", keys.size(), orgId, repo, serviceId);
+        int removed = deleteByPattern("testseer:" + orgId + ":" + repo + ":" + serviceId + ":*");
+        if (removed > 0) {
+            log.debug("Invalidated {} cache keys for {}/{}/{}", removed, orgId, repo, serviceId);
         }
+    }
+
+    public void invalidateOrg(String orgId) {
+        int removed = deleteByPattern("testseer:" + orgId + ":*");
+        if (removed > 0) {
+            log.debug("Invalidated {} cache keys for org {}", removed, orgId);
+        }
+    }
+
+    private int deleteByPattern(String pattern) {
+        Set<String> keys = redis.keys(pattern);
+        if (keys == null || keys.isEmpty()) {
+            return 0;
+        }
+        redis.delete(keys);
+        return keys.size();
     }
 
     private static String key(String orgId, String repo, String serviceId,

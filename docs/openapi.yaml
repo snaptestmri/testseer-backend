@@ -17,12 +17,14 @@ servers:
 tags:
 - description: Auto-register services by scanning a GitHub organisation
   name: Admin — Discovery
-- description: Trigger on-demand indexing of Java services
-  name: Admin — Indexing
 - description: Clear or rebuild indexed facts
+  name: Admin — Indexing
+- description: Trigger on-demand indexing of Java services
   name: Admin — Indexing
 - description: Replay failed ingestion jobs
   name: Admin — Jobs
+- description: Maven artifact link maintenance
+  name: Admin — Maven
 - description: Org-scoped catalog library and service module configuration (CFG-CAT)
   name: Admin — Workspace Catalog
 - description: Impact analysis and test planning based on the indexed knowledge graph
@@ -97,28 +99,6 @@ paths:
       summary: Discover and register all Java services in a GitHub org
       tags:
       - Admin — Discovery
-  /admin/maven/backfill-links:
-    post:
-      description: |-
-        Re-runs InternalArtifactLinker against existing maven_dependency_facts for the latest
-        commit per service without a full re-index. Optionally syncs OWNED_BY graph edges.
-      operationId: backfillMavenLinks
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/MavenLinkBackfillRequest"
-        required: true
-      responses:
-        "200":
-          content:
-            '*/*':
-              schema:
-                $ref: "#/components/schemas/MavenLinkBackfillResponse"
-          description: OK
-      summary: Backfill maven dependency linkedServiceId
-      tags:
-      - Admin — Maven
   /admin/index/clear:
     post:
       description: |-
@@ -269,6 +249,29 @@ paths:
       summary: Replay a DLQ ingestion job
       tags:
       - Admin — Jobs
+  /admin/maven/backfill-links:
+    post:
+      description: |-
+        Re-runs InternalArtifactLinker against existing maven_dependency_facts for the latest
+        commit per service (or one serviceId). Updates linked_service_id, link_source, cross_repo
+        without a full re-index. Optionally syncs OWNED_BY graph edges (ARTIFACT → SERVICE).
+      operationId: backfillLinks
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MavenLinkBackfillRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/MavenLinkBackfillResponse"
+          description: OK
+      summary: Backfill maven dependency linkedServiceId
+      tags:
+      - Admin — Maven
   /registry/services:
     get:
       description: Returns all registered services across all organisations.
@@ -834,6 +837,11 @@ paths:
           type: string
       - in: query
         name: flowStep
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: packagePrefix
         required: false
         schema:
           type: string
@@ -3094,19 +3102,18 @@ components:
       properties:
         artifactId:
           type: string
+        crossRepo:
+          type: boolean
         fromModulePath:
           type: string
         groupId:
+          type: string
+        linkSource:
           type: string
         linkedRepo:
           type: string
         linkedServiceId:
           type: string
-        linkSource:
-          type: string
-          description: MAVEN_MODULE_GAV | CATALOG | REGISTRY | ALIAS
-        crossRepo:
-          type: boolean
         optional:
           type: boolean
         resolved:
@@ -3278,6 +3285,8 @@ components:
       type: object
       properties:
         actor:
+          type: string
+        attributes:
           type: string
         boundary:
           type: string
@@ -3764,47 +3773,6 @@ components:
           type: string
         topicOrType:
           type: string
-    MavenLinkBackfillRequest:
-      type: object
-      properties:
-        orgId:
-          type: string
-        serviceId:
-          type: string
-        syncOwnedByEdges:
-          type: boolean
-          default: false
-    MavenLinkBackfillResponse:
-      type: object
-      properties:
-        orgId:
-          type: string
-        servicesProcessed:
-          type: integer
-          format: int32
-        dependencyRowsUpdated:
-          type: integer
-          format: int32
-        ownedByEdgesSynced:
-          type: integer
-          format: int32
-        services:
-          type: array
-          items:
-            $ref: "#/components/schemas/MavenLinkBackfillServiceSummary"
-    MavenLinkBackfillServiceSummary:
-      type: object
-      properties:
-        serviceId:
-          type: string
-        commitSha:
-          type: string
-        rowsUpdated:
-          type: integer
-          format: int32
-        ownedByEdges:
-          type: integer
-          format: int32
     IndexClearRequest:
       type: object
       properties:
@@ -3918,11 +3886,19 @@ components:
       type: object
       description: Request to index all Java files in a server-accessible directory
       properties:
+        bulkIndex:
+          type: boolean
+          description: "When true (e.g. index-all-repos.sh), applies bulk Maven tree\
+            \ defaults unless mavenTreeResolution is set explicitly."
         catalogLibraryId:
           type: string
           description: Optional workspace.yml catalogLibraries id when multiple libs
             share one repo
           example: platform-bigquery
+        mavenTreeResolution:
+          type: boolean
+          description: "Override Maven dependency:tree resolution for this index.\
+            \ When omitted and bulkIndex is true, uses testseer.maven.bulk-index-tree-resolution-enabled."
         orgId:
           type: string
           description: GitHub organisation identifier
@@ -3994,6 +3970,37 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ModuleView"
+    MavenLinkBackfillRequest:
+      type: object
+      properties:
+        orgId:
+          type: string
+          description: Org scope; resolved from service registry when omitted
+        serviceId:
+          type: string
+          description: Optional single service; when omitted all services with maven
+            facts in org
+        syncOwnedByEdges:
+          type: boolean
+          description: "When true, upsert OWNED_BY graph edges for cross-repo links"
+    MavenLinkBackfillResponse:
+      type: object
+      properties:
+        dependencyRowsUpdated:
+          type: integer
+          format: int32
+        orgId:
+          type: string
+        ownedByEdgesSynced:
+          type: integer
+          format: int32
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceBackfillSummary"
+        servicesProcessed:
+          type: integer
+          format: int32
     MessageSchemaView:
       type: object
       properties:
@@ -5501,6 +5508,19 @@ components:
         physicalName:
           type: string
         storeType:
+          type: string
+    ServiceBackfillSummary:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        ownedByEdges:
+          type: integer
+          format: int32
+        rowsUpdated:
+          type: integer
+          format: int32
+        serviceId:
           type: string
     ServiceDescriptionResponse:
       type: object

@@ -10,9 +10,11 @@ import java.util.List;
 public class MavenDependencyQueryService {
 
     private final JdbcClient db;
+    private final MavenModuleLookupService moduleLookup;
 
-    public MavenDependencyQueryService(JdbcClient db) {
+    public MavenDependencyQueryService(JdbcClient db, MavenModuleLookupService moduleLookup) {
         this.db = db;
+        this.moduleLookup = moduleLookup;
     }
 
     public MavenDependenciesReport query(
@@ -24,9 +26,17 @@ public class MavenDependencyQueryService {
             String groupIdFilter,
             String artifactIdFilter) {
 
-        List<ModuleView> modules = loadModules(serviceId, commitSha, modulePath);
+        String resolvedModule = null;
+        if (modulePath != null && !modulePath.isBlank()) {
+            resolvedModule = moduleLookup.resolveModulePath(serviceId, commitSha, modulePath).orElse(null);
+            if (resolvedModule == null) {
+                return new MavenDependenciesReport(List.of(), List.of());
+            }
+        }
+
+        List<ModuleView> modules = loadModules(serviceId, commitSha, resolvedModule);
         List<DependencyView> dependencies = loadDependencies(
-                serviceId, commitSha, modulePath, scope, directOnly, groupIdFilter, artifactIdFilter);
+                serviceId, commitSha, resolvedModule, scope, directOnly, groupIdFilter, artifactIdFilter);
         return new MavenDependenciesReport(modules, dependencies);
     }
 
@@ -51,7 +61,7 @@ public class MavenDependencyQueryService {
                 """)
                 .param("serviceId", serviceId)
                 .param("commitSha", commitSha);
-        if (modulePath != null && !modulePath.isBlank()) {
+        if (modulePath != null) {
             spec = db.sql("""
                     SELECT module_path, group_id, artifact_id, version, packaging, resolution_status, relative_pom_path
                     FROM maven_module_facts
@@ -88,7 +98,7 @@ public class MavenDependencyQueryService {
                 FROM maven_dependency_facts
                 WHERE service_id = :serviceId AND commit_sha = :commitSha
                 """);
-        if (modulePath != null && !modulePath.isBlank()) {
+        if (modulePath != null) {
             sql.append(" AND from_module_path = :modulePath");
         }
         List<String> scopeFilter = MavenScopeFilter.sqlScopes(scope);
@@ -109,7 +119,7 @@ public class MavenDependencyQueryService {
         var spec = db.sql(sql.toString())
                 .param("serviceId", serviceId)
                 .param("commitSha", commitSha);
-        if (modulePath != null && !modulePath.isBlank()) {
+        if (modulePath != null) {
             spec = spec.param("modulePath", modulePath);
         }
         if (!scopeFilter.isEmpty()) {

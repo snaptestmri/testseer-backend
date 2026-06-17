@@ -12,6 +12,32 @@ class YamlExternalEndpointExtractorTest {
     private final YamlExternalEndpointExtractor extractor = new YamlExternalEndpointExtractor();
 
     @Test
+    void extract_findsHyveeOfferEndpointFromDevYaml() {
+        String yaml = """
+                integrator:
+                  partners:
+                    hyvee:
+                      offer-endpoint: http://riq-mock-api-gw/mockapi-service/LoyaltyOnlineWS/REST/Promotion.ashx
+                ois-rest-template-configs:
+                  partner-publish-details-endpoint: https://riq-dev.corp.quotient.com/ois/offer/%s/partnerpublishingdetails
+                """;
+
+        List<YamlExternalEndpointExtractor.YamlEndpointCandidate> results = extractor.extract(
+                List.of(new YamlPubSubExtractor.ConfigFile(
+                        "partner-adapter-consumer/src/main/resources/application-dev.yaml", yaml)));
+
+        assertThat(results).hasSizeGreaterThanOrEqualTo(2);
+        assertThat(results).anyMatch(r ->
+                "integrator.partners.hyvee.offer-endpoint".equals(r.configKey())
+                        && r.urlResolved().contains("Promotion.ashx")
+                        && "dev".equals(r.envLane()));
+        assertThat(results).anyMatch(r ->
+                "ois-rest-template-configs.partner-publish-details-endpoint".equals(r.configKey())
+                        && r.urlResolved().contains("riq-dev.corp.quotient.com")
+                        && "dev".equals(r.envLane()));
+    }
+
+    @Test
     void extract_findsHyveeOfferEndpointFromPdnYaml() {
         String yaml = """
                 integrator:

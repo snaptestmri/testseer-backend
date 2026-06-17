@@ -34,6 +34,55 @@ class CrossRepoGapClassifierTest {
     }
 
     @Test
+    void classifyMissingSubscriber_terminalExternalForPartnerAdapterNotification() {
+        var rules = new MessagingRulePack.CrossRepoTraceRule(
+                List.copyOf(MANIFEST_REPOS),
+                List.of(),
+                List.of(new MessagingRulePack.TerminalTopicRule(
+                        "partner-adapter-notification",
+                        "*.PARTNER_ADAPTER_NOTIFICATION",
+                        "PARTNER_EXTERNAL",
+                        "Partner adapter notification egress")));
+        var classifier = new CrossRepoGapClassifier(rules, MANIFEST_REPOS);
+
+        for (String topic : List.of(
+                "DEV_T.PARTNER_ADAPTER_NOTIFICATION",
+                "T.PARTNER_ADAPTER_NOTIFICATION",
+                "PDN_T.PARTNER_ADAPTER_NOTIFICATION")) {
+            var gap = classifier.classifyMissingSubscriber(new CrossRepoGapClassifier.TopicContext(
+                    topic, 2,
+                    List.of(runtimePublisher("svc-pub", "partner-adapter-ns")),
+                    List.of(),
+                    List.of()));
+
+            assertThat(gap).isPresent();
+            assertThat(gap.get().gapType()).isEqualTo("TERMINAL_EXTERNAL");
+            assertThat(gap.get().topicShortId()).isEqualTo(topic);
+        }
+    }
+
+    @Test
+    void classifyMissingSubscriber_terminalExternalForUmoEvent() {
+        var rules = new MessagingRulePack.CrossRepoTraceRule(
+                List.copyOf(MANIFEST_REPOS),
+                List.of(),
+                List.of(new MessagingRulePack.TerminalTopicRule(
+                        "partner-adapter-umo", "*.UMO_EVENT", "PARTNER_EXTERNAL",
+                        "Freedom UMO publish topic")));
+        var classifier = new CrossRepoGapClassifier(rules, MANIFEST_REPOS);
+
+        var gap = classifier.classifyMissingSubscriber(new CrossRepoGapClassifier.TopicContext(
+                "T.UMO_EVENT",
+                3,
+                List.of(runtimePublisher("svc-pub", "partner-adapter-consumer")),
+                List.of(),
+                List.of()));
+
+        assertThat(gap).isPresent();
+        assertThat(gap.get().gapType()).isEqualTo("TERMINAL_EXTERNAL");
+    }
+
+    @Test
     void classifyMissingSubscriber_manifestOnlyPublisher() {
         var classifier = new CrossRepoGapClassifier(MessagingRulePack.CrossRepoTraceRule.empty(), MANIFEST_REPOS);
 

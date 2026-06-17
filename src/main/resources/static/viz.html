@@ -387,11 +387,18 @@
 
     <!-- Service Flow Diagram fields (BL-054) -->
     <div id="journey-flow-fields" style="display:none;flex-wrap:wrap;gap:10px;align-items:flex-end">
-      <div><label>Service</label><select id="journey-flow-svc"></select></div>
+      <div><label>Service</label><select id="journey-flow-svc" onchange="onFlowServiceChange()"></select></div>
       <div><label>Anchor</label>
-        <input id="journey-flow-anchor" type="text" placeholder="handlerFqn:com...Consumer.method" style="min-width:360px"/></div>
-      <div><label>Package prefix</label>
-        <input id="journey-flow-prefix" type="text" placeholder="com.quotient.platform.transaction.eval" style="min-width:280px"/></div>
+        <select id="journey-flow-anchor" onchange="onFlowAnchorChange()" style="min-width:360px">
+          <option value="">Select anchor…</option>
+        </select>
+        <div id="journey-flow-anchor-custom-wrap" style="display:none;margin-top:4px">
+          <input id="journey-flow-anchor-custom" type="text" placeholder="handlerFqn:com…Class.method" style="min-width:360px"/>
+        </div>
+        <button type="button" class="btn" id="journey-flow-anchor-toggle" style="font-size:11px;padding:2px 8px;margin-top:4px" onclick="toggleFlowAnchorCustom()">Custom anchor…</button>
+      </div>
+      <div><label>Package prefix <span style="color:#484f58">(optional)</span></label>
+        <input id="journey-flow-prefix" type="text" placeholder="auto from anchor" style="min-width:280px" oninput="onFlowPrefixInput()" onchange="onFlowPrefixChange()"/></div>
     </div>
 
     <!-- Event Flow fields -->
@@ -656,6 +663,7 @@ async function loadStatus() {
 
     populateImpactSelect();
     populateJourneySelect();
+    populateFlowSelect();
     populateGraphMavenSelect();
     renderStats();
     renderGrid();
@@ -1564,6 +1572,10 @@ async function runImpact() {
 
 // ── Journey tab ───────────────────────────────────────────────────────────────
 let journeyMode = 'entry';
+let flowPrefixAutoFilled = false;
+let flowAnchorCustomMode = false;
+const FLOW_ANCHOR_KIND_ORDER = { KAFKA_SUBSCRIBE: 0, PUBSUB_SUBSCRIBE: 1, REST_INBOUND: 2, WEBHOOK_INBOUND: 3, CRON_K8S: 4 };
+const FLOW_MODULE_SUFFIXES = new Set(['consumer', 'processors', 'producer', 'job', 'jobs', 'ns', 'api', 'service', 'web', 'handler', 'listener']);
 let eventFlowViewMode = (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('ts-event-flow-view')) || 'pipeline';
 let eventFlowFocusServiceId = (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('ts-event-flow-focus')) || '';
 let eventFlowHighlightPath = typeof sessionStorage === 'undefined' || sessionStorage.getItem('ts-event-flow-highlight') !== 'false';
@@ -1636,6 +1648,168 @@ function populateFocusServiceSelect(report) {
   }
 }
 
+function populateFlowSelect() {
+  const sel = document.getElementById('journey-flow-svc');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = allServices.map(s =>
+    `<option value="${s.serviceId}">${s.serviceName} (${s.orgId}/${s.repo})</option>`
+  ).join('');
+  const entrySvc = document.getElementById('journey-svc');
+  if (entrySvc?.value && [...sel.options].some(o => o.value === entrySvc.value)) {
+    sel.value = entrySvc.value;
+  } else if (prev && [...sel.options].some(o => o.value === prev)) {
+    sel.value = prev;
+  }
+}
+
+function flowAnchorFromTrigger(t) {
+  if (t.linkedHandlerFqn) {
+    let fqn = t.linkedHandlerFqn;
+    if (t.linkedMethod && !fqn.endsWith('.' + t.linkedMethod)) {
+      fqn = fqn + '.' + t.linkedMethod;
+    }
+    return 'handlerFqn:' + fqn;
+  }
+  if (t.triggerId) return 'triggerId:' + t.triggerId;
+  return '';
+}
+
+function flowAnchorLabel(t) {
+  const kind = t.triggerKind || 'TRIGGER';
+  const path = triggerPathLine(t);
+  if (t.linkedHandlerFqn) {
+    const handler = handlerShortName(t.linkedHandlerFqn);
+    const method = t.linkedMethod && handler && !handler.endsWith('.' + t.linkedMethod) ? '.' + t.linkedMethod + '()' : '';
+    return `[${kind}] ${handler}${method} — ${path}`;
+  }
+  return `[${kind}] ${path}`;
+}
+
+function flowAnchorCandidates(triggers) {
+  const seen = new Set();
+  return dedupeTriggers(triggers || [])
+    .filter(t => t.triggerKind !== 'SPRING_BOOT_MAIN')
+    .map(t => ({ t, anchor: flowAnchorFromTrigger(t) }))
+    .filter(x => x.anchor && !seen.has(x.anchor) && seen.add(x.anchor))
+    .sort((a, b) => {
+      const ka = FLOW_ANCHOR_KIND_ORDER[a.t.triggerKind] ?? 99;
+      const kb = FLOW_ANCHOR_KIND_ORDER[b.t.triggerKind] ?? 99;
+      if (ka !== kb) return ka - kb;
+      return flowAnchorLabel(a.t).localeCompare(flowAnchorLabel(b.t));
+    });
+}
+
+function derivePackagePrefixFromHandlerFqn(fqn) {
+  if (!fqn) return '';
+  const parts = fqn.split('.');
+  if (parts.length < 3) return '';
+  parts.pop();
+  parts.pop();
+  while (parts.length > 2 && FLOW_MODULE_SUFFIXES.has(parts[parts.length - 1].toLowerCase())) {
+    parts.pop();
+  }
+  return parts.join('.');
+}
+
+function derivePackagePrefixFromAnchor(anchor) {
+  const m = String(anchor || '').match(/^handlerFqn:(.+)$/);
+  return m ? derivePackagePrefixFromHandlerFqn(m[1]) : '';
+}
+
+function resolvedFlowAnchor() {
+  if (flowAnchorCustomMode) {
+    return document.getElementById('journey-flow-anchor-custom')?.value.trim() || '';
+  }
+  return document.getElementById('journey-flow-anchor')?.value.trim() || '';
+}
+
+function toggleFlowAnchorCustom() {
+  flowAnchorCustomMode = !flowAnchorCustomMode;
+  const wrap = document.getElementById('journey-flow-anchor-custom-wrap');
+  const sel = document.getElementById('journey-flow-anchor');
+  const btn = document.getElementById('journey-flow-anchor-toggle');
+  if (wrap) wrap.style.display = flowAnchorCustomMode ? 'block' : 'none';
+  if (sel) sel.style.display = flowAnchorCustomMode ? 'none' : '';
+  if (btn) btn.textContent = flowAnchorCustomMode ? 'Use trigger list' : 'Custom anchor…';
+}
+
+function onFlowPrefixInput() {
+  flowPrefixAutoFilled = false;
+}
+
+async function onFlowPrefixChange() {
+  if (journeyMode === 'flow') await loadFlowAnchors();
+}
+
+function onFlowAnchorChange() {
+  if (flowAnchorCustomMode) return;
+  const anchor = document.getElementById('journey-flow-anchor')?.value;
+  if (!anchor) return;
+  const prefixEl = document.getElementById('journey-flow-prefix');
+  if (!prefixEl) return;
+  if (!prefixEl.value.trim() || flowPrefixAutoFilled) {
+    const derived = derivePackagePrefixFromAnchor(anchor);
+    if (derived) {
+      prefixEl.value = derived;
+      flowPrefixAutoFilled = true;
+    }
+  }
+}
+
+async function onFlowServiceChange() {
+  flowPrefixAutoFilled = false;
+  const prefixEl = document.getElementById('journey-flow-prefix');
+  if (prefixEl) prefixEl.value = '';
+  await loadFlowAnchors();
+}
+
+async function loadFlowAnchors() {
+  const sel = document.getElementById('journey-flow-anchor');
+  const svcSel = document.getElementById('journey-flow-svc');
+  if (!sel || !svcSel) return;
+  const svcId = svcSel.value;
+  if (!svcId) {
+    sel.innerHTML = '<option value="">Select a service first</option>';
+    return;
+  }
+  const prefix = document.getElementById('journey-flow-prefix')?.value.trim() || '';
+  const prev = sel.value;
+  sel.disabled = true;
+  sel.innerHTML = '<option value="">Loading anchors…</option>';
+  try {
+    let triggers;
+    const params = new URLSearchParams({ serviceId: svcId });
+    if (prefix) params.set('packagePrefix', prefix);
+    try {
+      const env = await api(`/v1/facts/entry-triggers?${params}`);
+      triggers = env.data || [];
+      triggerMap[svcId] = triggers;
+    } catch (_) {
+      triggers = triggerMap[svcId] || [];
+    }
+    const candidates = flowAnchorCandidates(triggers);
+    if (!candidates.length) {
+      sel.innerHTML = '<option value="">No entry triggers — index service or use Custom anchor</option>';
+      return;
+    }
+    sel.innerHTML = '<option value="">Select anchor…</option>' +
+      candidates.map(({ t, anchor }) =>
+        `<option value="${esc(anchor)}">${esc(flowAnchorLabel(t))}</option>`
+      ).join('');
+    if (prev && [...sel.options].some(o => o.value === prev)) {
+      sel.value = prev;
+    } else {
+      sel.value = candidates[0].anchor;
+      onFlowAnchorChange();
+    }
+  } catch (_) {
+    sel.innerHTML = '<option value="">Failed to load anchors</option>';
+  } finally {
+    sel.disabled = false;
+  }
+}
+
 function setJourneyMode(mode) {
   journeyMode = mode;
   document.querySelectorAll('.mode-btn').forEach(b =>
@@ -1653,9 +1827,8 @@ function setJourneyMode(mode) {
     loadJourneyTopics();
   }
   if (mode === 'flow') {
-    const flowSvc = document.getElementById('journey-flow-svc');
-    const entrySvc = document.getElementById('journey-svc');
-    if (flowSvc && entrySvc) flowSvc.innerHTML = entrySvc.innerHTML;
+    populateFlowSelect();
+    loadFlowAnchors();
   }
 }
 
@@ -1680,11 +1853,11 @@ async function runJourney() {
       canvas.innerHTML = renderEntryFlow(resp.data, allServices.find(s => s.serviceId === svcId));
     } else if (journeyMode === 'flow') {
       const svcId = document.getElementById('journey-flow-svc').value;
-      const anchor = document.getElementById('journey-flow-anchor').value.trim();
+      const anchor = resolvedFlowAnchor();
       const prefix = document.getElementById('journey-flow-prefix').value.trim();
       const svc = allServices.find(s => s.serviceId === svcId);
       if (!anchor) {
-        errEl.innerHTML = '<div class="error-msg">Anchor is required (e.g. handlerFqn:com...Consumer.method)</div>';
+        errEl.innerHTML = '<div class="error-msg">Select an anchor from entry triggers or enter a custom handlerFqn / triggerId</div>';
         canvas.innerHTML = '';
         return;
       }
@@ -2754,6 +2927,13 @@ window.eventFlowGraphResetZoom = eventFlowGraphResetZoom;
 window.onEventFlowFocusChange = onEventFlowFocusChange;
 window.onEventFlowLiveVerifyChange = onEventFlowLiveVerifyChange;
 window.onEventFlowHighlightChange = onEventFlowHighlightChange;
+window.populateFlowSelect = populateFlowSelect;
+window.loadFlowAnchors = loadFlowAnchors;
+window.onFlowServiceChange = onFlowServiceChange;
+window.onFlowAnchorChange = onFlowAnchorChange;
+window.onFlowPrefixInput = onFlowPrefixInput;
+window.onFlowPrefixChange = onFlowPrefixChange;
+window.toggleFlowAnchorCustom = toggleFlowAnchorCustom;
 window.buildEventFlowGraphModel = buildEventFlowGraphModel;
 window.computePrimaryTracePath = computePrimaryTracePath;
 window.renderMatrixCell = renderMatrixCell;

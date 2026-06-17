@@ -823,6 +823,11 @@ public class MessagingFlowService {
     }
 
     public List<DataAccessView> queryDataAccess(String serviceId) {
+        return queryDataAccess(serviceId, null, true);
+    }
+
+    public List<DataAccessView> queryDataAccess(
+            String serviceId, String packagePrefix, boolean excludeTestHandlers) {
         String orgId = db.sql("SELECT org_id FROM service_registry WHERE service_id = :svcId LIMIT 1")
                 .param("svcId", serviceId)
                 .query(String.class)
@@ -852,8 +857,20 @@ public class MessagingFlowService {
                         List.of()
                 )).list();
 
-        if (orgId == null) return raw;
-        return consistencyHintEnricher.enrichDataAccess(serviceId, mergeService.mergeAll(orgId, raw));
+        if (orgId == null) return filterDataAccess(raw, packagePrefix, excludeTestHandlers);
+        return filterDataAccess(
+                consistencyHintEnricher.enrichDataAccess(serviceId, mergeService.mergeAll(orgId, raw)),
+                packagePrefix,
+                excludeTestHandlers);
+    }
+
+    private static List<DataAccessView> filterDataAccess(
+            List<DataAccessView> rows, String packagePrefix, boolean excludeTestHandlers) {
+        return rows.stream()
+                .filter(row -> !excludeTestHandlers || HandlerScopeFilter.isProductionHandler(row.handlerClassFqn()))
+                .filter(row -> packagePrefix == null || packagePrefix.isBlank()
+                        || PackagePrefixFilter.matches(row.handlerClassFqn(), packagePrefix))
+                .toList();
     }
 
     public List<FlowGateView> queryGates(String serviceId, String env) {
@@ -865,24 +882,57 @@ public class MessagingFlowService {
     }
 
     public List<FlowGateView> queryGatesWithLive(String serviceId, String env, boolean refreshLive) {
-        List<FlowGateView> gates = queryGatesFromDb(serviceId, env);
+        return queryGatesWithLive(serviceId, env, refreshLive, null);
+    }
+
+    public List<FlowGateView> queryGatesWithLive(
+            String serviceId, String env, boolean refreshLive, String packagePrefix) {
+        List<FlowGateView> gates = queryGatesFromDb(serviceId, env, packagePrefix);
         return liveConfigSnapshotService.overlayGates(env, gates, refreshLive);
     }
 
     private List<FlowGateView> queryGatesFromDb(String serviceId, String env) {
+        return queryGatesFromDb(serviceId, env, null);
+    }
+
+    private List<FlowGateView> queryGatesFromDb(String serviceId, String env, String packagePrefix) {
+        String prefixClause = "";
+        if (packagePrefix != null && !packagePrefix.isBlank()) {
+            prefixClause = """
+                    AND (
+                      f.guarded_symbol_fqn LIKE :prefix || '%'
+                      OR EXISTS (
+                        SELECT 1 FROM graph_edges e
+                        JOIN graph_nodes gn_from ON gn_from.id = e.from_node
+                        JOIN graph_nodes gn_to ON gn_to.id = e.to_node
+                        WHERE e.edge_type IN ('DEPENDS_ON', 'INVOKES')
+                          AND gn_from.symbol_fqn LIKE :prefix || '%'
+                          AND gn_to.symbol_fqn = split_part(f.guarded_symbol_fqn, '#', 1)
+                      )
+                    )
+                    """;
+        }
         var spec = db.sql("""
-                SELECT guarded_symbol_fqn, guarded_flow_step, gate_kind, gate_key, required_value,
-                       effect_when_fail, test_precondition, evidence_source, confidence
-                FROM flow_gate_facts
-                WHERE service_id = :svcId
-                """).param("svcId", serviceId);
+                SELECT f.guarded_symbol_fqn, f.guarded_flow_step, f.gate_kind, f.gate_key, f.required_value,
+                       f.effect_when_fail, f.test_precondition, f.evidence_source, f.confidence
+                FROM flow_gate_facts f
+                WHERE f.service_id = :svcId
+                """ + prefixClause).param("svcId", serviceId);
+        if (packagePrefix != null && !packagePrefix.isBlank()) {
+            spec = spec.param("prefix", packagePrefix);
+        }
         if (env != null && !env.isBlank()) {
             spec = db.sql("""
-                    SELECT guarded_symbol_fqn, guarded_flow_step, gate_kind, gate_key, required_value,
-                           effect_when_fail, test_precondition, evidence_source, confidence
-                    FROM flow_gate_facts
-                    WHERE service_id = :svcId AND (env_lane = :env OR env_lane = 'unknown')
-                    """).param("svcId", serviceId).param("env", env);
+                    SELECT f.guarded_symbol_fqn, f.guarded_flow_step, f.gate_kind, f.gate_key, f.required_value,
+                           f.effect_when_fail, f.test_precondition, f.evidence_source, f.confidence
+                    FROM flow_gate_facts f
+                    WHERE f.service_id = :svcId AND (f.env_lane = :env OR f.env_lane = 'unknown')
+                    """ + prefixClause)
+                    .param("svcId", serviceId)
+                    .param("env", env);
+            if (packagePrefix != null && !packagePrefix.isBlank()) {
+                spec = spec.param("prefix", packagePrefix);
+            }
         }
         return spec.query((rs, row) -> FlowGateView.fromDb(
                 rs.getString("guarded_symbol_fqn"), rs.getString("guarded_flow_step"),

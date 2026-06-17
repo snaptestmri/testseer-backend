@@ -18,12 +18,14 @@ public record ParsedModel(
         List<FieldInjectionDef> fieldInjections,
         List<MethodCallDef> methodCalls,
         List<FactoryRoutingDef> factoryRouting,
-        String componentBeanName
+        String componentBeanName,
+        List<String> implementedInterfaces
 ) {
     public ParsedModel {
         fieldInjections = fieldInjections == null ? List.of() : fieldInjections;
         methodCalls = methodCalls == null ? List.of() : methodCalls;
         factoryRouting = factoryRouting == null ? List.of() : factoryRouting;
+        implementedInterfaces = implementedInterfaces == null ? List.of() : implementedInterfaces;
     }
 
     /** Backward-compatible factory for tests and Kotlin light-parse stubs. */
@@ -43,10 +45,25 @@ public record ParsedModel(
         return new ParsedModel(
                 filePath, classFqn, annotations, constructorParamTypes, fieldInjectionTypes,
                 endpoints, outboundCalls, parseError, parseErrorDetail, classJavadoc,
-                publicMethods, enumValues, List.of(), List.of(), List.of(), null);
+                publicMethods, enumValues, List.of(), List.of(), List.of(), null, List.of());
     }
 
-    public record EndpointDef(String httpMethod, String path, String methodName) {}
+    public record EndpointDef(
+            String httpMethod,
+            String path,
+            String methodName,
+            String requestParams,
+            String pathSourceFieldFqn,
+            String pathResolution) {
+
+        public EndpointDef(String httpMethod, String path, String methodName) {
+            this(httpMethod, path, methodName, null, null, null);
+        }
+
+        public EndpointDef(String httpMethod, String path, String methodName, String requestParams) {
+            this(httpMethod, path, methodName, requestParams, null, null);
+        }
+    }
 
     public record OutboundCallDef(String clientType, String httpMethod, String path,
                                    String sourceMethod) {}

@@ -199,6 +199,50 @@ class DualWriteServiceTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void write_replacesExternalEndpointFactsOnReindex() {
+        FactBatch initial = FactBatch.create(
+                "job-v9a", "acme", "order-service", serviceId, "abc123", "DELTA",
+                List.of(), List.of(), List.of(), List.of(),
+                List.of(), List.of(), List.of(), List.of(), List.of(),
+                List.of(new FactBatch.ExternalEndpointFact(
+                        "hyvee:offer_sync", "hyvee", "OFFER_SYNC", "POST",
+                        "https://example.com/{id}", null,
+                        "dev", "EXTERNAL", "integrator.partners.hyvee.offer-endpoint",
+                        "application-dev.yaml", "com.example.HyveeOfferAdapter",
+                        "com.example.HyveeRestClient", "HYVEE_ADAPTER", "LmsSession",
+                        "YAML+javaparser", 0.92, "{}")),
+                List.of());
+
+        dualWriteService.write(initial, List.of());
+        assertThat(countTable("external_endpoint_facts")).isEqualTo(1);
+
+        FactBatch updated = FactBatch.create(
+                "job-v9b", "acme", "order-service", serviceId, "abc123", "DELTA",
+                List.of(), List.of(), List.of(), List.of(),
+                List.of(), List.of(), List.of(), List.of(), List.of(),
+                List.of(new FactBatch.ExternalEndpointFact(
+                        "hyvee:offer_sync", "hyvee", "OFFER_SYNC", "POST",
+                        "https://example.com/{id}", "https://example.com/promo",
+                        "dev", "EXTERNAL", "integrator.partners.hyvee.offer-endpoint",
+                        "application-dev.yaml", "com.example.HyveeOfferAdapter",
+                        "com.example.HyveeRestClient", "HYVEE_ADAPTER", "LmsSession",
+                        "YAML+javaparser", 0.92, "{}")),
+                List.of());
+
+        dualWriteService.write(updated, List.of());
+
+        assertThat(countTable("external_endpoint_facts")).isEqualTo(1);
+        String url = jdbcClient.sql("""
+                SELECT url_resolved FROM external_endpoint_facts
+                WHERE service_id = :svcId
+                """)
+                .param("svcId", serviceId)
+                .query(String.class)
+                .single();
+        assertThat(url).isEqualTo("https://example.com/promo");
+    }
+
+    @Test
     void write_persists_dataObjectFacts_to_postgres() {
         FactBatch batch = FactBatch.create(
                 "job-v10", "acme", "platform-data", serviceId, "abc123", "DELTA",

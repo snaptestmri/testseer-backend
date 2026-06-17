@@ -74,4 +74,25 @@ class CacheServiceTest {
                 () -> { calls.incrementAndGet(); return "a"; }, String.class);
         assertThat(calls.get()).isEqualTo(1);
     }
+
+    @Test
+    void invalidateOrg_removesAllKeysForOrg() {
+        cacheService.get("acme", "repo", "svc-001", "facts:class", "h1", () -> "a", String.class);
+        cacheService.get("acme", "repo", "svc-002", "facts:class", "h2", () -> "b", String.class);
+        cacheService.get("other", "repo", "svc-001", "facts:class", "h3", () -> "c", String.class);
+
+        cacheService.invalidateOrg("acme");
+
+        AtomicInteger acmeCalls = new AtomicInteger(0);
+        cacheService.get("acme", "repo", "svc-001", "facts:class", "h1",
+                () -> { acmeCalls.incrementAndGet(); return "a"; }, String.class);
+        cacheService.get("acme", "repo", "svc-002", "facts:class", "h2",
+                () -> { acmeCalls.incrementAndGet(); return "b"; }, String.class);
+        assertThat(acmeCalls.get()).isEqualTo(2);
+
+        AtomicInteger otherCalls = new AtomicInteger(0);
+        cacheService.get("other", "repo", "svc-001", "facts:class", "h3",
+                () -> { otherCalls.incrementAndGet(); return "c"; }, String.class);
+        assertThat(otherCalls.get()).isZero();
+    }
 }

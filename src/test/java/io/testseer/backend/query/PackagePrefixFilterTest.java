@@ -29,7 +29,7 @@ class PackagePrefixFilterTest {
                 "kafka:test", "KAFKA_SUBSCRIBE", "INBOUND", "dev",
                 "kafka", "INTERNAL", null, "QUOT.SALES.TRANSACTION.PIPELINE.EVENTS",
                 "com.quotient.platform.transaction.eval.consumer.TransactionEvalConsumer",
-                "processSalesCanonicalEvent", null, "yaml", "KAFKA_LISTENER", 0.95);
+                "processSalesCanonicalEvent", null, "yaml", "KAFKA_LISTENER", 0.95, null);
         assertThat(PackagePrefixFilter.matchesTrigger(trigger, "com.quotient.platform.transaction.eval")).isTrue();
     }
 }

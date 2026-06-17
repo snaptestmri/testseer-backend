@@ -21,7 +21,8 @@ public final class FlowDiagramModels {
             String triggerId,
             String linkedHandlerFqn,
             String symbolFqn,
-            String nodeId
+            String nodeId,
+            boolean autoSelected
     ) {}
 
     public record FlowDiagramNode(

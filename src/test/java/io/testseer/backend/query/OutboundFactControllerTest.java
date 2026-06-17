@@ -26,6 +26,7 @@ class OutboundFactControllerTest {
     @MockBean GraphProjectionService graphService;
     @MockBean GraphRoutingService graphRoutingService;
     @MockBean ServiceFlowDiagramComposer flowDiagramComposer;
+    @MockBean io.testseer.backend.graph.RestHandlerGraphResolver restHandlerGraphResolver;
     @MockBean FreshnessResolver freshnessResolver;
     @MockBean CacheService cacheService;
 

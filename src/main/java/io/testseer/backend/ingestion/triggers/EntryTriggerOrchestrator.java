@@ -27,6 +27,7 @@ public class EntryTriggerOrchestrator {
     private final SpringBootMainTriggerExtractor springBootMainTriggerExtractor;
     private final SpringBootMainDeploymentLinker springBootMainDeploymentLinker;
     private final CronHandlerLinker cronHandlerLinker;
+    private final RestControllerImplementationLinker restControllerImplementationLinker;
     private final TriggerRulePackLoader rulePackLoader;
 
     public EntryTriggerOrchestrator(
@@ -42,6 +43,7 @@ public class EntryTriggerOrchestrator {
             SpringBootMainTriggerExtractor springBootMainTriggerExtractor,
             SpringBootMainDeploymentLinker springBootMainDeploymentLinker,
             CronHandlerLinker cronHandlerLinker,
+            RestControllerImplementationLinker restControllerImplementationLinker,
             TriggerRulePackLoader rulePackLoader) {
         this.inboundRestTriggerExtractor = inboundRestTriggerExtractor;
         this.springCronTriggerExtractor = springCronTriggerExtractor;
@@ -55,6 +57,7 @@ public class EntryTriggerOrchestrator {
         this.springBootMainTriggerExtractor = springBootMainTriggerExtractor;
         this.springBootMainDeploymentLinker = springBootMainDeploymentLinker;
         this.cronHandlerLinker = cronHandlerLinker;
+        this.restControllerImplementationLinker = restControllerImplementationLinker;
         this.rulePackLoader = rulePackLoader;
     }
 
@@ -92,8 +95,10 @@ public class EntryTriggerOrchestrator {
 
         List<FactBatch.EntryTriggerFact> merged = new ArrayList<>();
         java.util.Set<String> seenTriggerIds = new java.util.LinkedHashSet<>();
-        addTriggers(merged, seenTriggerIds, inboundRestTriggerExtractor.extract(
-                models, rulePackLoader.getRulePack(), defaultEnvLane));
+        List<FactBatch.EntryTriggerFact> restTriggers = restControllerImplementationLinker.link(
+                inboundRestTriggerExtractor.extract(models, rulePackLoader.getRulePack(), defaultEnvLane),
+                models);
+        addTriggers(merged, seenTriggerIds, restTriggers);
         addTriggers(merged, seenTriggerIds, springCronTriggerExtractor.extract(models, contentByPath, defaultEnvLane));
         addTriggers(merged, seenTriggerIds, gcsTriggerExtractor.extract(models, contentByPath, defaultEnvLane));
         addTriggers(merged, seenTriggerIds, k8sCronTriggerExtractor.extract(configFiles, defaultEnvLane));

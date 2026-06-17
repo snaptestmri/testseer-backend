@@ -122,4 +122,48 @@ class InboundRestTriggerExtractorTest {
 
         assertThat(extractor.extract(List.of(model), rulePack, "unknown")).isEmpty();
     }
+
+    @Test
+    void extract_duplicatePathDifferentHandlersProduceDistinctTriggerIds() {
+        ParsedModel defaultApi = ParsedModel.of(
+                "ReceiptSubmitServiceApi.java",
+                "com.example.ReceiptSubmitServiceApi",
+                List.of(),
+                List.of(), List.of(),
+                List.of(new ParsedModel.EndpointDef("POST", "/receipt/submit", "submitReceipt")),
+                List.of(), false, null, null, List.of(), List.of());
+
+        ParsedModel caApi = ParsedModel.of(
+                "CAReceiptSubmitServiceAPI.java",
+                "com.example.CAReceiptSubmitServiceAPI",
+                List.of(), List.of(), List.of(),
+                List.of(new ParsedModel.EndpointDef("POST", "/receipt/submit", "submitReceipt")),
+                List.of(), false, null, null, List.of(), List.of());
+
+        List<FactBatch.EntryTriggerFact> facts = extractor.extract(
+                List.of(defaultApi, caApi), TriggerRulePack.empty(), "dev");
+
+        assertThat(facts).hasSize(2);
+        assertThat(facts).extracting(FactBatch.EntryTriggerFact::triggerId).doesNotHaveDuplicates();
+    }
+
+    @Test
+    void extract_includesRequestParamsInAttributesAndTriggerId() {
+        ParsedModel model = ParsedModel.of(
+                "ReceiptScanApi.java",
+                "com.example.ReceiptScanApi",
+                List.of(), List.of(), List.of(),
+                List.of(new ParsedModel.EndpointDef(
+                        "POST", "/receipt/scan", "scanReceipt", "shopmium")),
+                List.of(), false, null, null, List.of(), List.of());
+
+        List<FactBatch.EntryTriggerFact> facts = extractor.extract(
+                List.of(model), TriggerRulePack.empty(), "dev");
+
+        assertThat(facts).singleElement().satisfies(f -> {
+            assertThat(f.triggerId()).contains("shopmium");
+            assertThat(f.attributes()).contains("requestParams");
+            assertThat(f.attributes()).contains("shopmium");
+        });
+    }
 }

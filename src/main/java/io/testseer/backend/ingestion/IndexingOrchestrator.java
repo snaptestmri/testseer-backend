@@ -7,6 +7,7 @@ import io.testseer.backend.graph.GraphFactProjector;
 import io.testseer.backend.graph.MavenGraphProjector;
 import io.testseer.backend.graph.MessagingGraphProjector;
 import io.testseer.backend.ingestion.catalog.CatalogFactOrchestrator;
+import io.testseer.backend.ingestion.catalog.EndpointPathEnricher;
 import io.testseer.backend.ingestion.catalog.SchemaDdlExtractor;
 import io.testseer.backend.ingestion.maven.MavenFactOrchestrator;
 import io.testseer.backend.ingestion.maven.MavenIndexOptions;
@@ -56,6 +57,7 @@ public class IndexingOrchestrator {
     private final MavenFactOrchestrator mavenFactOrchestrator;
     private final MavenGraphProjector mavenGraphProjector;
     private final MavenProperties mavenProperties;
+    private final EndpointPathEnricher endpointPathEnricher;
 
     public IndexingOrchestrator(
             JavaParserService parserService,
@@ -77,7 +79,8 @@ public class IndexingOrchestrator {
             DlqRetryPathExtractor dlqRetryPathExtractor,
             MavenFactOrchestrator mavenFactOrchestrator,
             MavenGraphProjector mavenGraphProjector,
-            MavenProperties mavenProperties) {
+            MavenProperties mavenProperties,
+            EndpointPathEnricher endpointPathEnricher) {
         this.parserService = parserService;
         this.messagingFactOrchestrator = messagingFactOrchestrator;
         this.catalogFactOrchestrator = catalogFactOrchestrator;
@@ -98,6 +101,7 @@ public class IndexingOrchestrator {
         this.mavenFactOrchestrator = mavenFactOrchestrator;
         this.mavenGraphProjector = mavenGraphProjector;
         this.mavenProperties = mavenProperties;
+        this.endpointPathEnricher = endpointPathEnricher;
     }
 
     public IndexingResult index(
@@ -182,6 +186,7 @@ public class IndexingOrchestrator {
                     file.path(), file.content(), model
             ));
         }
+        sources = endpointPathEnricher.enrich(sources);
         timer.lap("parse");
 
         MessagingFactOrchestrator.IndexingFacts facts = messagingFactOrchestrator.buildFacts(

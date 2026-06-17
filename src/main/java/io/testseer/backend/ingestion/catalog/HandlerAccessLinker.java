@@ -166,11 +166,16 @@ public class HandlerAccessLinker {
     }
 
     private static String inferStoreType(String accessorFqn) {
-        if (accessorFqn == null) return "MARIADB";
+        StoreType hinted = StoreType.fromPackageHint(accessorFqn);
+        if (hinted != StoreType.UNKNOWN) {
+            return hinted.dbValue();
+        }
+        if (accessorFqn == null) return StoreType.MARIADB.dbValue();
         String lower = accessorFqn.toLowerCase(Locale.ROOT);
-        if (lower.contains(".mongo.") || lower.contains("mongodb")) return "MONGODB";
-        if (lower.contains(".nosql.") || lower.contains("cassandra")) return "CASSANDRA";
-        return "MARIADB";
+        if (lower.contains(".mongo.") || lower.contains("mongodb")) return StoreType.MONGODB.dbValue();
+        if (lower.contains(".nosql.") || lower.contains("cassandra")) return StoreType.CASSANDRA.dbValue();
+        if (lower.contains("bigquery")) return StoreType.BIGQUERY.dbValue();
+        return StoreType.MARIADB.dbValue();
     }
 
     private static String inferTableFromAccessor(String accessorFqn, String methodName) {

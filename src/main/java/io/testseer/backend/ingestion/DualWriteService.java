@@ -377,6 +377,17 @@ public class DualWriteService {
     }
 
     private void writeExternalEndpointFacts(FactBatch batch) {
+        if (batch.externalEndpointFacts().isEmpty()) {
+            return;
+        }
+        db.sql("""
+                DELETE FROM external_endpoint_facts
+                WHERE service_id = :serviceId AND commit_sha = :commitSha
+                """)
+                .param("serviceId", batch.serviceId())
+                .param("commitSha", batch.commitSha())
+                .update();
+
         String sql = """
                 INSERT INTO external_endpoint_facts
                   (org_id, repo, service_id, commit_sha, snapshot_type, endpoint_id, partner_slug,
@@ -419,6 +430,17 @@ public class DualWriteService {
     }
 
     private void writeExternalCallSiteFacts(FactBatch batch) {
+        if (batch.externalCallSiteFacts().isEmpty()) {
+            return;
+        }
+        db.sql("""
+                DELETE FROM external_call_site_facts
+                WHERE service_id = :serviceId AND commit_sha = :commitSha
+                """)
+                .param("serviceId", batch.serviceId())
+                .param("commitSha", batch.commitSha())
+                .update();
+
         String sql = """
                 INSERT INTO external_call_site_facts
                   (org_id, repo, service_id, commit_sha, snapshot_type, source_symbol,

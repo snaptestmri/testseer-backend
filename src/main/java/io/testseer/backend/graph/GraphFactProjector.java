@@ -6,6 +6,7 @@ import io.testseer.backend.ingestion.FactBatch;
 import io.testseer.backend.ingestion.ParsedModel;
 import io.testseer.backend.ingestion.catalog.ImportIndex;
 import io.testseer.backend.ingestion.catalog.TypeFqnResolver;
+import io.testseer.backend.ingestion.graph.ListInjectionFactoryRoutingEnricher;
 import io.testseer.backend.query.IndexCompleteNotifier;
 import io.testseer.backend.registry.ServiceEntry;
 import io.testseer.backend.registry.ServiceRegistryService;
@@ -71,6 +72,10 @@ public class GraphFactProjector {
             String source = sourceByClassFqn != null ? sourceByClassFqn.get(model.classFqn()) : null;
             projectModel(batch, svc, model, source, beanIndex, routingRows);
         }
+
+        projectListInjectionFactoryRoutes(batch, svc, models, sourceByClassFqn, beanIndex, routingRows);
+
+        projectInterfaceImplBridges(batch, svc, models);
 
         persistRoutingFacts(batch, routingRows);
         refreshServiceCallEdges(batch.serviceId(), svc.serviceName());
@@ -211,6 +216,148 @@ public class GraphFactProjector {
                             GraphEdge.outboundTo(classNodeId, targetId)));
         }
         edgeUpdater.replaceEdges(classNodeId, "OUTBOUND_TO", outboundEdges);
+    }
+
+    private void projectListInjectionFactoryRoutes(
+            FactBatch batch,
+            ServiceEntry svc,
+            List<ParsedModel> models,
+            Map<String, String> sourceByClassFqn,
+            Map<String, String> beanIndex,
+            List<RoutingRow> routingRows) {
+
+        Map<String, List<ParsedModel.FactoryRoutingDef>> byFactory =
+                ListInjectionFactoryRoutingEnricher.enrichByFactory(models, sourceByClassFqn);
+
+        for (Map.Entry<String, List<ParsedModel.FactoryRoutingDef>> entry : byFactory.entrySet()) {
+            String factoryFqn = entry.getKey();
+            String classNodeId = GraphNodeIds.classNode(batch.serviceId(), factoryFqn);
+            nodeRepo.upsert(GraphNode.clazz(
+                    classNodeId, svc.orgId(), svc.repo(), svc.serviceName(), factoryFqn));
+
+            RoutingRulePack.FactoryRoutingRule factoryMeta =
+                    factoryMeta(factoryFqn, routingRulePackLoader.getRulePack());
+            List<GraphEdge> routesToEdges = new ArrayList<>();
+
+            for (ParsedModel.FactoryRoutingDef route : entry.getValue()) {
+                String targetFqn = route.targetClassFqn();
+                if (!isClassFqn(targetFqn)) {
+                    continue;
+                }
+                String targetNodeId = GraphNodeIds.classNode(batch.serviceId(), targetFqn);
+                nodeRepo.upsert(GraphNode.clazz(
+                        targetNodeId, svc.orgId(), svc.repo(), svc.serviceName(), targetFqn));
+                routesToEdges.add(GraphEdge.routesTo(classNodeId, targetNodeId));
+
+                String selector = route.selectorMethod() != null
+                        ? route.selectorMethod()
+                        : factoryMeta != null ? factoryMeta.selectorMethod() : null;
+                String discriminator = route.discriminatorType() != null
+                        ? route.discriminatorType()
+                        : factoryMeta != null ? factoryMeta.discriminatorType() : null;
+                routingRows.add(new RoutingRow(
+                        factoryFqn, selector, discriminator,
+                        route.routingKey(), route.targetBean(), targetFqn, route.fallback()));
+            }
+            if (!routesToEdges.isEmpty()) {
+                edgeUpdater.replaceEdges(classNodeId, "ROUTES_TO", routesToEdges);
+            }
+        }
+    }
+
+    /**
+     * GRP-19: bridge REST API interfaces to {@code @RestController} implementations for reachability seeding.
+     */
+    private void projectInterfaceImplBridges(FactBatch batch, ServiceEntry svc, List<ParsedModel> models) {
+        Map<String, ParsedModel> byFqn = new LinkedHashMap<>();
+        for (ParsedModel model : models) {
+            if (model.classFqn() != null) {
+                byFqn.put(model.classFqn(), model);
+            }
+        }
+
+        for (ParsedModel model : models) {
+            if (model.classFqn() == null || !isRestController(model)) {
+                continue;
+            }
+            String implNodeId = GraphNodeIds.classNode(batch.serviceId(), model.classFqn());
+            nodeRepo.upsert(GraphNode.clazz(
+                    implNodeId, svc.orgId(), svc.repo(), svc.serviceName(), model.classFqn()));
+
+            for (String ifaceType : model.implementedInterfaces()) {
+                String ifaceFqn = resolveInterfaceFqn(ifaceType, model.classFqn(), byFqn);
+                if (!isClassFqn(ifaceFqn) || ifaceFqn.equals(model.classFqn())) {
+                    continue;
+                }
+                String ifaceNodeId = GraphNodeIds.classNode(batch.serviceId(), ifaceFqn);
+                nodeRepo.upsert(GraphNode.clazz(
+                        ifaceNodeId, svc.orgId(), svc.repo(), svc.serviceName(), ifaceFqn));
+                edgeUpdater.replaceEdges(
+                        ifaceNodeId,
+                        "IMPLEMENTS",
+                        List.of(GraphEdge.implementsEdge(ifaceNodeId, implNodeId)));
+
+                bridgeInterfaceMethodInvokes(batch, svc, model, ifaceFqn, ifaceNodeId, implNodeId);
+            }
+        }
+    }
+
+    private void bridgeInterfaceMethodInvokes(
+            FactBatch batch,
+            ServiceEntry svc,
+            ParsedModel impl,
+            String ifaceFqn,
+            String ifaceNodeId,
+            String implNodeId) {
+        Map<String, List<GraphEdge>> ifaceMethodEdges = new LinkedHashMap<>();
+        List<GraphEdge> ifaceClassEdges = new ArrayList<>();
+
+        for (ParsedModel.MethodCallDef call : impl.methodCalls()) {
+            if (!isClassFqn(call.calleeClassFqn())) {
+                continue;
+            }
+            String ifaceMethodNodeId = GraphNodeIds.methodNode(
+                    batch.serviceId(), ifaceFqn, call.callerMethod());
+            nodeRepo.upsert(GraphNode.method(
+                    ifaceMethodNodeId, svc.orgId(), svc.repo(), svc.serviceName(),
+                    ifaceFqn + "#" + call.callerMethod()));
+
+            String calleeNodeId = GraphNodeIds.classNode(batch.serviceId(), call.calleeClassFqn());
+            nodeRepo.upsert(GraphNode.clazz(
+                    calleeNodeId, svc.orgId(), svc.repo(), svc.serviceName(), call.calleeClassFqn()));
+
+            ifaceMethodEdges.computeIfAbsent(ifaceMethodNodeId, k -> new ArrayList<>())
+                    .add(GraphEdge.invokes(ifaceMethodNodeId, calleeNodeId));
+            ifaceClassEdges.add(GraphEdge.invokes(ifaceNodeId, calleeNodeId));
+        }
+
+        for (Map.Entry<String, List<GraphEdge>> entry : ifaceMethodEdges.entrySet()) {
+            edgeUpdater.replaceEdges(entry.getKey(), "INVOKES", entry.getValue());
+        }
+        if (!ifaceClassEdges.isEmpty()) {
+            edgeUpdater.replaceEdges(ifaceNodeId, "INVOKES", dedupeEdges(ifaceClassEdges));
+        }
+    }
+
+    private static String resolveInterfaceFqn(
+            String ifaceType, String implClassFqn, Map<String, ParsedModel> byFqn) {
+        if (ifaceType == null || ifaceType.isBlank()) {
+            return ifaceType;
+        }
+        if (ifaceType.contains(".") && byFqn.containsKey(ifaceType)) {
+            return ifaceType;
+        }
+        String pkg = packageOf(implClassFqn);
+        String candidate = pkg.isBlank() ? ifaceType : pkg + "." + ifaceType;
+        if (byFqn.containsKey(candidate)) {
+            return candidate;
+        }
+        return candidate;
+    }
+
+    private static boolean isRestController(ParsedModel model) {
+        return model.annotations().stream()
+                .anyMatch(a -> "RestController".equals(a) || "Controller".equals(a));
     }
 
     private static List<GraphEdge> dedupeEdges(List<GraphEdge> edges) {

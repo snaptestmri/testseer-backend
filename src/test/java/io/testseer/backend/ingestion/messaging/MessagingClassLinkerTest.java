@@ -222,6 +222,32 @@ class MessagingClassLinkerTest {
     }
 
     @Test
+    void linkPubSub_linksSyncProducerKafkaPublisher() {
+        var pubsub = List.of(new FactBatch.PubSubResourceFact(
+                "TOPIC", "QUOT.REBATE.REDEEM.EVENTS", "dev", "dev", null, null,
+                "PUBLISH", "kafka.topics.rebate.redeem.topic-name",
+                "user-profile-service/kubernetes-manifests/dev/application.yaml",
+                "user-profile-service", null, null, null,
+                "YAML_KAFKA", 0.95, "{\"transport\":\"KAFKA\"}"));
+
+        var java = List.of(new ProtoSchemaExtractor.JavaSourceFile(
+                "user-profile-service/src/main/java/com/quotient/platform/userprofile/producer/UserEmailAcceptanceRedeemEventProducer.java",
+                "class UserEmailAcceptanceRedeemEventProducer { "
+                        + "@Qualifier(\"rebateRedeemSyncProducer\") SyncProducer rebateRedeemSyncProducer; "
+                        + "publishEvent() { rebateRedeemSyncProducer.send(qMsgEvent); } }",
+                "com.quotient.platform.userprofile.producer.UserEmailAcceptanceRedeemEventProducer"));
+
+        List<FactBatch.PubSubResourceFact> linked = linker.linkPubSub(pubsub, java);
+
+        assertThat(linked).singleElement().satisfies(f -> {
+            assertThat(f.linkedClassFqn()).isEqualTo(
+                    "com.quotient.platform.userprofile.producer.UserEmailAcceptanceRedeemEventProducer");
+            assertThat(f.linkedMethod()).isEqualTo("publishEvent");
+            assertThat(f.evidenceSource()).isEqualTo("JAVA_INFERRED");
+        });
+    }
+
+    @Test
     void linkSchemasToTopics_resolvesTopicFromPubSub() {
         var schemas = List.of(new FactBatch.MessageSchemaFact(
                 "QMsgEvent", "OfferEvents.OfferUpdateEvent", "[]", null,

@@ -8,6 +8,7 @@ import io.testseer.backend.ingestion.ParsedModel;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -53,11 +54,17 @@ public class InboundRestTriggerExtractor {
                         ? rule.envLane()
                         : (defaultEnvLane != null ? defaultEnvLane : "unknown");
 
-                String triggerId = buildTriggerId(actor, triggerKind, ep.httpMethod(), normalizedPath, handlerFqn);
-                String key = triggerId + "|" + envLane + "|" + ep.httpMethod() + "|" + normalizedPath;
+                String triggerId = buildTriggerId(
+                        actor, triggerKind, ep.httpMethod(), normalizedPath, model.classFqn(), ep.requestParams());
+                String key = triggerId + "|" + envLane + "|" + ep.httpMethod() + "|" + normalizedPath
+                        + "|" + model.classFqn();
                 if (!seen.add(key)) continue;
 
-                double confidence = rule != null ? 0.92 : heuristicConfidence(model.classFqn(), normalizedPath);
+                double confidence = rule != null ? 0.92
+                        : heuristicConfidence(model.classFqn(), normalizedPath);
+                if ("FIELD".equals(ep.pathResolution())) {
+                    confidence = Math.max(confidence, 0.90);
+                }
 
                 results.add(new FactBatch.EntryTriggerFact(
                         triggerId,
@@ -74,7 +81,7 @@ public class InboundRestTriggerExtractor {
                         model.filePath(),
                         rule != null ? "RULE_PACK" : "JAVA_HEURISTIC",
                         confidence,
-                        attributes(model.classFqn(), handlerFqn)
+                        attributes(model.classFqn(), handlerFqn, ep)
                 ));
             }
         }
@@ -133,11 +140,16 @@ public class InboundRestTriggerExtractor {
     }
 
     private static String buildTriggerId(
-            String actor, String kind, String httpMethod, String path, String handlerFqn) {
+            String actor, String kind, String httpMethod, String path, String handlerClassFqn, String requestParams) {
+        String handlerSuffix = sanitize(simpleName(handlerClassFqn));
+        String paramSuffix = requestParams != null && !requestParams.isBlank()
+                ? ":" + sanitize(requestParams)
+                : "";
         if (path != null && !path.isBlank()) {
-            return sanitize(actor) + ":" + sanitize(httpMethod) + ":" + sanitize(path);
+            return sanitize(actor) + ":" + sanitize(httpMethod) + ":" + sanitize(path)
+                    + ":" + handlerSuffix + paramSuffix;
         }
-        return sanitize(actor) + ":" + sanitize(kind) + ":" + sanitize(simpleName(handlerFqn));
+        return sanitize(actor) + ":" + sanitize(kind) + ":" + handlerSuffix + paramSuffix;
     }
 
     private static String normalizePath(String path) {
@@ -149,12 +161,21 @@ public class InboundRestTriggerExtractor {
         return model.annotations().stream().anyMatch(a -> a.contains("FeignClient"));
     }
 
-    private String attributes(String classFqn, String handlerFqn) {
+    private String attributes(String classFqn, String handlerFqn, ParsedModel.EndpointDef ep) {
         try {
-            return mapper.writeValueAsString(Map.of(
-                    "classFqn", classFqn,
-                    "handlerSymbol", handlerFqn
-            ));
+            Map<String, Object> attrs = new LinkedHashMap<>();
+            attrs.put("classFqn", classFqn);
+            attrs.put("handlerSymbol", handlerFqn);
+            if (ep.requestParams() != null && !ep.requestParams().isBlank()) {
+                attrs.put("requestParams", ep.requestParams());
+            }
+            if (ep.pathSourceFieldFqn() != null && !ep.pathSourceFieldFqn().isBlank()) {
+                attrs.put("pathSourceFieldFqn", ep.pathSourceFieldFqn());
+            }
+            if (ep.pathResolution() != null && !ep.pathResolution().isBlank()) {
+                attrs.put("pathResolution", ep.pathResolution());
+            }
+            return mapper.writeValueAsString(attrs);
         } catch (JsonProcessingException ex) {
             return "{}";
         }

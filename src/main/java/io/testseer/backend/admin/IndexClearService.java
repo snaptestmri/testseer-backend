@@ -158,6 +158,7 @@ public class IndexClearService {
                     .param("orgId", orgId).update());
         }
 
+        cacheService.invalidateOrg(orgId);
         log.info("Cleared org {} (includeRegistry={})", orgId, includeRegistry);
         return new IndexClearResponse("ORG", orgId, null, null, deleted);
     }

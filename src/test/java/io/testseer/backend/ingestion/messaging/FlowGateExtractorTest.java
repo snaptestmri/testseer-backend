@@ -39,6 +39,36 @@ class FlowGateExtractorTest {
     }
 
     @Test
+    void extract_detectsReversedFreedomLiteralInsertedByGate() {
+        String java = """
+                package com.example.adapter;
+                public class HyveeOfferAdapter {
+                  public void process(Offer offer) {
+                    boolean isFreedomOffer = false;
+                    if (StringUtils.isNotEmpty(offer.getInsertedBy())) {
+                      isFreedomOffer = "FREEDOM".equalsIgnoreCase(offer.getInsertedBy());
+                    }
+                    if (!isFreedomOffer) {
+                      return;
+                    }
+                  }
+                }
+                """;
+        var javaFiles = List.of(new ProtoSchemaExtractor.JavaSourceFile(
+                "HyveeOfferAdapter.java", java, "com.example.adapter.HyveeOfferAdapter"));
+
+        List<FactBatch.FlowGateFact> gates = extractor.extract(List.of(), javaFiles, List.of());
+
+        assertThat(gates).anyMatch(g ->
+                "BUSINESS_RULE".equals(g.gateKind())
+                        && "insertedBy".equals(g.gateKey())
+                        && "FREEDOM".equals(g.requiredValue())
+                        && g.guardedSymbolFqn().contains("HyveeOfferAdapter"));
+        assertThat(gates).anyMatch(g ->
+                "CODE_FLAG".equals(g.gateKind()) && "isFreedomOffer=true".equals(g.gateKey()));
+    }
+
+    @Test
     void extract_detectsYamlEnabledFlag() {
         String yaml = """
                 partner-notify-enabled: true
@@ -283,22 +313,48 @@ class FlowGateExtractorTest {
     }
 
     @Test
-    void extract_declaredGate_forConditionalStackingHelper() {
+    void extract_detectsStaticImportSystemConfig_partnerScoped() {
         String java = """
-                package com.quotient.platform.transaction.eval.helper;
-                public class ConditionalOfferStackingHelper {
-                  private static final String KEY = "CONDITIONAL_STACKING_OFFERIDS";
+                package com.quotient.platform.userprofile.helper;
+                import static com.quotient.platform.domain.SystemConfigKeys.UseLegacyPagination;
+                public class RestHelper {
+                  void paginateInfo() {
+                    configService.isConfigEnabled(partnerAppUser.getPartnerId(), UseLegacyPagination.toString());
+                  }
                 }
                 """;
         var javaFiles = List.of(new ProtoSchemaExtractor.JavaSourceFile(
-                "ConditionalOfferStackingHelper.java", java,
-                "com.quotient.platform.transaction.eval.helper.ConditionalOfferStackingHelper"));
+                "RestHelper.java", java, "com.quotient.platform.userprofile.helper.RestHelper"));
 
         List<FactBatch.FlowGateFact> gates = extractor.extract(List.of(), javaFiles, List.of());
 
         assertThat(gates).anyMatch(g ->
                 "SYSTEM_CONFIG".equals(g.gateKind())
-                        && "CONDITIONAL_STACKING_OFFERIDS".equals(g.gateKey())
-                        && "RULE_PACK".equals(g.evidenceSource()));
+                        && "UseLegacyPagination".equals(g.gateKey())
+                        && g.guardedSymbolFqn().contains("RestHelper"));
+    }
+
+    @Test
+    void extract_detectsStringValueOfSystemConfig() {
+        String java = """
+                package com.quotient.platform.userprofile.service;
+                public class TransactionHistoryServiceImpl {
+                  void getDuplicateDetails() {
+                    if (!configService.isConfigEnabled(
+                            String.valueOf(SystemConfigKeys.DisplayDuplicateDetectionDetails))) {
+                      return;
+                    }
+                  }
+                }
+                """;
+        var javaFiles = List.of(new ProtoSchemaExtractor.JavaSourceFile(
+                "TransactionHistoryServiceImpl.java", java,
+                "com.quotient.platform.userprofile.service.TransactionHistoryServiceImpl"));
+
+        List<FactBatch.FlowGateFact> gates = extractor.extract(List.of(), javaFiles, List.of());
+
+        assertThat(gates).anyMatch(g ->
+                "SYSTEM_CONFIG".equals(g.gateKind())
+                        && "DisplayDuplicateDetectionDetails".equals(g.gateKey()));
     }
 }

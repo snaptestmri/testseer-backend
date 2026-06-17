@@ -39,7 +39,7 @@ public class ServiceFlowDiagramComposer {
 
     public FlowDiagramModels.FlowDiagramResult compose(FlowDiagramModels.ComposeRequest req) {
         FlowDiagramAnchorResolver.ResolvedAnchor resolved =
-                anchorResolver.resolve(req.orgId(), req.serviceId(), req.anchor());
+                anchorResolver.resolve(req.orgId(), req.serviceId(), req.anchor(), req.packagePrefix());
 
         FlowDiagramGraphExpander.ExpansionResult expansion = expander.expand(
                 req.orgId(),

@@ -2,6 +2,7 @@ package io.testseer.backend.ingestion;
 
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseResult;
+import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.EnumDeclaration;
@@ -34,6 +35,10 @@ public class JavaParserService {
             "delete", "DELETE", "patch", "PATCH"
     );
 
+    /** Verbs recognized on @*Mapping / RequestMethod / HttpMethod annotations. */
+    private static final List<String> SUPPORTED_HTTP_METHODS = List.of(
+            "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS");
+
     private static final Map<String, String> TEMPLATE_METHODS = Map.of(
             "getForEntity",   "GET",
             "getForObject",   "GET",
@@ -51,12 +56,14 @@ public class JavaParserService {
     private final TypeFqnResolver typeFqnResolver;
 
     public JavaParserService(TypeFqnResolver typeFqnResolver) {
-        this.parser = new JavaParser();
+        ParserConfiguration config = new ParserConfiguration()
+                .setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
+        this.parser = new JavaParser(config);
         this.typeFqnResolver = typeFqnResolver;
     }
 
     /** Test / legacy no-arg — FQN resolution degrades to simple names. */
-    JavaParserService() {
+    public JavaParserService() {
         this(null);
     }
 
@@ -190,11 +197,18 @@ public class JavaParserService {
                 FactoryRoutingExtractor.extract(cls, classFqn, fieldInjectionDefs, beanResolver);
         String componentBeanName = FactoryRoutingExtractor.extractComponentBeanName(cls);
 
+        List<String> implementedInterfaces = cls.getImplementedTypes().stream()
+                .map(t -> typeResolver.resolve(t.getNameAsString()))
+                .filter(fqn -> fqn != null && !fqn.isBlank())
+                .distinct()
+                .toList();
+
         return new ParsedModel(
                 filePath, classFqn, annotations, constructorParams,
                 fieldInjections, endpoints, outboundCalls, false, null,
                 classJavadoc, publicMethods, List.of(),
-                fieldInjectionDefs, methodCalls, factoryRouting, componentBeanName
+                fieldInjectionDefs, methodCalls, factoryRouting, componentBeanName,
+                implementedInterfaces
         );
     }
 
@@ -240,23 +254,69 @@ public class JavaParserService {
 
         for (MethodDeclaration method : cls.getMethods()) {
             for (AnnotationExpr ann : method.getAnnotations()) {
-                String httpMethod = switch (ann.getNameAsString()) {
-                    case "GetMapping"     -> "GET";
-                    case "PostMapping"    -> "POST";
-                    case "PutMapping"     -> "PUT";
-                    case "DeleteMapping"  -> "DELETE";
-                    case "PatchMapping"   -> "PATCH";
-                    case "RequestMapping" -> "GET";
-                    default -> null;
-                };
-                if (httpMethod != null) {
-                    String methodPath = annotationValue(ann, "");
+                List<String> httpMethods = httpMethodsForMappingAnnotation(ann);
+                if (httpMethods.isEmpty()) {
+                    continue;
+                }
+                String methodPath = annotationValue(ann, "");
+                String requestParams = extractMappingParams(ann);
+                for (String httpMethod : httpMethods) {
                     result.add(new ParsedModel.EndpointDef(
-                            httpMethod, classMapping + methodPath, method.getNameAsString()));
+                            httpMethod, classMapping + methodPath, method.getNameAsString(), requestParams));
                 }
             }
         }
         return result;
+    }
+
+    private static List<String> httpMethodsForMappingAnnotation(AnnotationExpr ann) {
+        return switch (ann.getNameAsString()) {
+            case "GetMapping" -> List.of("GET");
+            case "PostMapping" -> List.of("POST");
+            case "PutMapping" -> List.of("PUT");
+            case "DeleteMapping" -> List.of("DELETE");
+            case "PatchMapping" -> List.of("PATCH");
+            case "RequestMapping" -> extractHttpMethodsFromRequestMapping(ann);
+            default -> List.of();
+        };
+    }
+
+    /**
+     * Reads {@code method = RequestMethod.POST} (or array / HttpMethod variants).
+     * When {@code method} is omitted, Spring matches all verbs — emit all supported methods.
+     */
+    private static List<String> extractHttpMethodsFromRequestMapping(AnnotationExpr ann) {
+        if (ann.isNormalAnnotationExpr()) {
+            Optional<String> methodExpr = ann.asNormalAnnotationExpr().getPairs().stream()
+                    .filter(p -> "method".equals(p.getNameAsString()))
+                    .map(p -> p.getValue().toString())
+                    .findFirst();
+            if (methodExpr.isPresent()) {
+                List<String> parsed = parseHttpMethodExpression(methodExpr.get());
+                if (!parsed.isEmpty()) {
+                    return parsed;
+                }
+            }
+        }
+        return List.copyOf(SUPPORTED_HTTP_METHODS);
+    }
+
+    private static List<String> parseHttpMethodExpression(String expr) {
+        Set<String> found = new LinkedHashSet<>();
+        String upper = expr.toUpperCase();
+        for (String method : SUPPORTED_HTTP_METHODS) {
+            if (upper.contains("METHOD." + method) || upper.contains("." + method)) {
+                found.add(method);
+            }
+        }
+        if (found.isEmpty()) {
+            for (String method : SUPPORTED_HTTP_METHODS) {
+                if (upper.matches("(?i).*\\b" + method + "\\b.*")) {
+                    found.add(method);
+                }
+            }
+        }
+        return List.copyOf(found);
     }
 
     private List<ParsedModel.OutboundCallDef> extractOutboundCalls(
@@ -349,6 +409,18 @@ public class JavaParserService {
         });
 
         return result;
+    }
+
+    private static String extractMappingParams(AnnotationExpr ann) {
+        if (!ann.isNormalAnnotationExpr()) {
+            return null;
+        }
+        return ann.asNormalAnnotationExpr().getPairs().stream()
+                .filter(p -> "params".equals(p.getNameAsString()))
+                .map(p -> p.getValue().toString().replace("\"", "").trim())
+                .filter(v -> !v.isBlank())
+                .findFirst()
+                .orElse(null);
     }
 
     private static String annotationValue(AnnotationExpr ann, String defaultValue) {
