@@ -40,12 +40,15 @@ public class ImpactAnalysisService {
         List<ImpactReport.AffectedConsumer> consumers = findAffectedConsumers(serviceId, changed);
         List<ImpactReport.DownstreamDependency> downstream = loadDownstreamDependencies(
                 serviceId, commitSha, changed);
+        List<ImpactReport.ExternalDependency> externalDownstream =
+                loadExternalDownstreamDependencies(serviceId, commitSha, changed);
         List<ImpactReport.SuggestedTest> suggestions = buildSuggestions(
-                serviceId, changed, consumers);
+                serviceId, changed, consumers, externalDownstream);
         List<String> missing = computeMissingTestClasses(serviceId, changed);
+        List<ImpactReport.ArtifactImpact> artifactImpact = loadArtifactImpact(serviceId, commitSha);
 
         return new ImpactReport(serviceId, commitSha, changed, consumers,
-                downstream, suggestions, missing);
+                downstream, externalDownstream, suggestions, missing, artifactImpact);
     }
 
     private List<String> computeMissingTestClasses(String serviceId,
@@ -212,10 +215,50 @@ public class ImpactAnalysisService {
                 .list();
     }
 
+    private List<ImpactReport.ExternalDependency> loadExternalDownstreamDependencies(
+            String serviceId, String commitSha, List<ImpactReport.ChangedSymbol> changed) {
+
+        if (changed == null || changed.isEmpty()) return List.of();
+
+        Set<String> classFqns = new HashSet<>();
+        for (ImpactReport.ChangedSymbol sym : changed) {
+            if ("CLASS".equals(sym.symbolKind())) {
+                classFqns.add(sym.symbolFqn());
+            }
+        }
+        if (classFqns.isEmpty()) return List.of();
+
+        return db.sql("""
+                SELECT DISTINCT e.caller_class_fqn, e.endpoint_id, e.partner_slug, e.operation,
+                       e.http_method, e.url_resolved, e.config_key, e.flow_step, e.boundary
+                FROM external_endpoint_facts e
+                WHERE e.service_id = :svcId
+                  AND e.commit_sha = :sha
+                  AND e.caller_class_fqn = ANY(:fqns)
+                ORDER BY e.endpoint_id
+                """)
+                .param("svcId", serviceId)
+                .param("sha", commitSha)
+                .param("fqns", classFqns.toArray(new String[0]))
+                .query((rs, row) -> new ImpactReport.ExternalDependency(
+                        rs.getString("caller_class_fqn"),
+                        rs.getString("endpoint_id"),
+                        rs.getString("partner_slug"),
+                        rs.getString("operation"),
+                        rs.getString("http_method"),
+                        rs.getString("url_resolved"),
+                        rs.getString("config_key"),
+                        rs.getString("flow_step"),
+                        rs.getString("boundary")
+                ))
+                .list();
+    }
+
     private List<ImpactReport.SuggestedTest> buildSuggestions(
             String serviceId,
             List<ImpactReport.ChangedSymbol> changed,
-            List<ImpactReport.AffectedConsumer> consumers) {
+            List<ImpactReport.AffectedConsumer> consumers,
+            List<ImpactReport.ExternalDependency> externalDownstream) {
 
         List<ImpactReport.SuggestedTest> suggestions = new ArrayList<>();
         Set<String> testFqns = loadTestClassFqns(serviceId);
@@ -277,6 +320,20 @@ public class ImpactAnalysisService {
                 }
             }
         }
+
+        for (ImpactReport.ExternalDependency ext : externalDownstream) {
+            String key = "EXT:" + ext.endpointId() + ":" + ext.callerClass();
+            if (seen.add(key)) {
+                suggestions.add(new ImpactReport.SuggestedTest(
+                        "INTEGRATION",
+                        null,
+                        ext.partnerSlug(),
+                        false,
+                        "Re-test external " + ext.httpMethod() + " " + ext.operation()
+                                + " (" + ext.endpointId() + ") — config "
+                                + ext.configKey()));
+            }
+        }
         return suggestions;
     }
 
@@ -317,6 +374,107 @@ public class ImpactAnalysisService {
         return c.source() + "|" + c.consumerServiceId() + "|" + c.consumerClass()
                 + "|" + c.httpMethod() + "|" + c.path();
     }
+
+    private List<ImpactReport.ArtifactImpact> loadArtifactImpact(String serviceId, String commitSha) {
+        List<DepRow> current = db.sql("""
+                SELECT to_group_id, to_artifact_id, to_version, version_literal
+                FROM maven_dependency_facts
+                WHERE service_id = :svcId AND commit_sha = :sha AND resolved = true
+                """)
+                .param("svcId", serviceId)
+                .param("sha", commitSha)
+                .query((rs, row) -> new DepRow(
+                        rs.getString("to_group_id"),
+                        rs.getString("to_artifact_id"),
+                        rs.getString("to_version"),
+                        rs.getString("version_literal")))
+                .list();
+        if (current.isEmpty()) {
+            return List.of();
+        }
+
+        String orgId = db.sql("SELECT org_id FROM service_registry WHERE service_id = :svcId")
+                .param("svcId", serviceId)
+                .query(String.class)
+                .optional()
+                .orElse(null);
+        if (orgId == null) {
+            return List.of();
+        }
+
+        List<ImpactReport.ArtifactImpact> impacts = new ArrayList<>();
+        Map<String, String> previousVersions = loadPreviousDependencyVersions(serviceId, commitSha);
+
+        for (DepRow dep : current) {
+            String coord = dep.groupId() + ":" + dep.artifactId();
+            String newVersion = dep.version() != null ? dep.version() : dep.versionLiteral();
+            String previousVersion = previousVersions.get(coord);
+            if (previousVersion != null && previousVersion.equals(newVersion)) {
+                continue;
+            }
+
+            List<ImpactReport.DownstreamArtifactService> downstream = db.sql("""
+                    SELECT DISTINCT ON (m.service_id) m.service_id, r.repo, m.to_version
+                    FROM maven_dependency_facts m
+                    JOIN service_registry r ON r.service_id = m.service_id
+                    WHERE r.org_id = :orgId
+                      AND m.to_group_id = :groupId
+                      AND m.to_artifact_id = :artifactId
+                      AND m.service_id <> :svcId
+                      AND m.resolved = true
+                    ORDER BY m.service_id, m.indexed_at DESC
+                    """)
+                    .param("orgId", orgId)
+                    .param("groupId", dep.groupId())
+                    .param("artifactId", dep.artifactId())
+                    .param("svcId", serviceId)
+                    .query((rs, row) -> new ImpactReport.DownstreamArtifactService(
+                            rs.getString("service_id"),
+                            rs.getString("repo"),
+                            rs.getString("to_version")))
+                    .list()
+                    .stream()
+                    .filter(d -> d.pinnedVersion() != null && !d.pinnedVersion().equals(newVersion))
+                    .toList();
+
+            if (previousVersion != null || !downstream.isEmpty()) {
+                impacts.add(new ImpactReport.ArtifactImpact(
+                        coord, previousVersion, newVersion, downstream));
+            }
+        }
+        return impacts;
+    }
+
+    private Map<String, String> loadPreviousDependencyVersions(String serviceId, String commitSha) {
+        List<DepRow> previous = db.sql("""
+                SELECT to_group_id, to_artifact_id, to_version, version_literal
+                FROM maven_dependency_facts
+                WHERE service_id = :svcId
+                  AND commit_sha <> :sha
+                  AND commit_sha IN (
+                      SELECT commit_sha FROM analysis_runs
+                      WHERE service_id = :svcId AND status = 'COMPLETE' AND commit_sha <> :sha
+                      ORDER BY completed_at DESC LIMIT 1
+                  )
+                """)
+                .param("svcId", serviceId)
+                .param("sha", commitSha)
+                .query((rs, row) -> new DepRow(
+                        rs.getString("to_group_id"),
+                        rs.getString("to_artifact_id"),
+                        rs.getString("to_version"),
+                        rs.getString("version_literal")))
+                .list();
+
+        Map<String, String> map = new LinkedHashMap<>();
+        for (DepRow row : previous) {
+            String version = row.version() != null ? row.version() : row.versionLiteral();
+            map.put(row.groupId() + ":" + row.artifactId(), version);
+        }
+        return map;
+    }
+
+    private record DepRow(String groupId, String artifactId, String version, String versionLiteral) {}
 
     private String extractAttr(String jsonAttrs, String key) {
         if (jsonAttrs == null) return null;

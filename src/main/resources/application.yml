@@ -1,3 +1,6 @@
+springdoc:
+  writer-with-order-by-keys: true
+
 spring:
   application:
     name: testseer-backend
@@ -35,12 +38,68 @@ spring:
         project-id: ${GCP_PROJECT_ID:testseer-dev}
 
 testseer:
+  github:
+    token: ${GITHUB_TOKEN:}
+    webhook-secret: ${GITHUB_WEBHOOK_SECRET:changeme}
+    comment-enabled: ${GITHUB_COMMENT_ENABLED:false}
+    comment-trace-base-url: ${GITHUB_COMMENT_TRACE_BASE_URL:}
   stale-threshold-minutes: 60
+  workspace-config-path: file:../config/workspace.yml
+  messaging:
+    rule-pack-path: file:../config/rule-packs/quotient-messaging.yml
+  routing:
+    rule-pack-path: file:../config/rule-packs/quotient-routing.yml
+  triggers:
+    rule-pack-path: file:../config/rule-packs/quotient-triggers.yml
+  contracts:
+    rule-pack-path: file:../config/rule-packs/quotient-api-contracts.yml
+  domain-actors:
+    rule-pack-path: file:../config/rule-packs/quotient-domain-actors.yml
+    test-suite-repos:
+      - riq-qa-REST-Assured
+  maven:
+    tree-resolution-enabled: ${MAVEN_TREE_RESOLUTION:true}
+    bulk-index-tree-resolution-enabled: ${MAVEN_BULK_TREE_RESOLUTION:false}
+    tree-timeout-seconds: ${MAVEN_TREE_TIMEOUT:120}
+    max-modules-per-index: ${MAVEN_MAX_MODULES:50}
+    tree-parallelism: ${MAVEN_TREE_PARALLELISM:4}
   pubsub:
     enabled: ${PUBSUB_ENABLED:false}
-  anthropic:
-    api-key: ${ANTHROPIC_API_KEY:}
-    enabled: ${ANTHROPIC_ENABLED:false}
+    live-verify-enabled: ${PUBSUB_LIVE_VERIFY:false}  # MSG-10: set true + GOOGLE_APPLICATION_CREDENTIALS to enable
+  notifications:
+    sse-enabled: ${NOTIFICATIONS_SSE_ENABLED:true}
+    enrich-commit-sha: ${NOTIFICATIONS_ENRICH_COMMIT_SHA:true}
+  live-config:
+    enabled: ${LIVE_CONFIG_ENABLED:false}
+    jdbc-url: ${LIVE_CONFIG_JDBC_URL:}
+    username: ${LIVE_CONFIG_USERNAME:}
+    password: ${LIVE_CONFIG_PASSWORD:}
+    env-lane-default: ${LIVE_CONFIG_ENV_DEFAULT:pdn}
+    cache-ttl-seconds: ${LIVE_CONFIG_CACHE_TTL_SECONDS:300}
+  cache:
+    ttl-seconds: 3600
+  observability:
+    request-id-header: X-Request-Id
+    job-id-header: X-Job-Id
+    mcp-client-header: X-TestSeer-Client
+    mcp-tool-header: X-MCP-Tool
+    json-logging: ${JSON_LOGGING:false}
+    max-job-attempts: 3
+    retry-backoff-base-ms: 30000  # attempt 1→30s, 2→60s, 3→120s, capped at 600s
+    dlq-refresh-ms: 60000
+    gap-export-interval-ms: 300000  # 5 min; D4 Grafana gap-count panel refresh rate
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus, metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
 
 logging:
   level:

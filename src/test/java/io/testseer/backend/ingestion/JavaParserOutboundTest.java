@@ -147,8 +147,75 @@ class JavaParserOutboundTest {
 
         ParsedModel model = parser.parse("AmbiguousClient.java", source);
 
-        assertThat(model.outboundCalls()).isNotEmpty();
         assertThat(model.outboundCalls().stream()
                 .anyMatch(c -> c.clientType().contains("RestClient"))).isTrue();
+    }
+
+    @Test
+    void restTemplate_exchange_extractsPostWithDynamicUri() {
+        String source = """
+                package com.example;
+                import org.springframework.http.HttpMethod;
+                import org.springframework.web.client.RestTemplate;
+                public class HyveeRestClient {
+                    private final RestTemplate restTemplate;
+                    public String send(String requestURI) {
+                        return restTemplate.exchange(requestURI, HttpMethod.POST, null, String.class).getBody();
+                    }
+                }
+                """;
+
+        ParsedModel model = parser.parse("HyveeRestClient.java", source);
+
+        List<ParsedModel.OutboundCallDef> calls = model.outboundCalls().stream()
+                .filter(c -> c.httpMethod() != null)
+                .toList();
+        assertThat(calls).hasSize(1);
+        assertThat(calls.get(0).httpMethod()).isEqualTo("POST");
+        assertThat(calls.get(0).path()).isNull();
+    }
+
+    @Test
+    void restServiceSubclass_callWithRetry_extractsConfigBackedOutbound() {
+        String source = """
+                package com.example;
+                import com.quotient.api.rest.RestService;
+                import org.springframework.boot.context.properties.ConfigurationProperties;
+                @ConfigurationProperties("rest.apis.pubsub")
+                public class PubSubNotificationClient extends RestService<Void, Object> {
+                    public void callNotificationAPI() {
+                        callWithRetry(null, Void.class);
+                    }
+                }
+                """;
+
+        ParsedModel model = parser.parse(
+                "evaluation-consumers/transaction-eval-consumer/src/main/java/com/example/PubSubNotificationClient.java",
+                source);
+
+        assertThat(model.outboundCalls()).anyMatch(c ->
+                "RestService".equals(c.clientType())
+                        && "POST".equals(c.httpMethod())
+                        && "rest.apis.pubsub".equals(c.path()));
+    }
+
+    @Test
+    void workbenchClient_createWorkbenchSubmission_extractsOutbound() {
+        String source = """
+                package com.example;
+                import com.quotient.platform.restclients.workbench.WorkbenchSubmissionRestClient;
+                public class WorkbenchSubmissionRest {
+                    private WorkbenchSubmissionRestClient workbenchSubmissionRestClient;
+                    public void sendToWB(Object request, String partnerId) {
+                        workbenchSubmissionRestClient.createWorkbenchSubmission(request, partnerId);
+                    }
+                }
+                """;
+
+        ParsedModel model = parser.parse("WorkbenchSubmissionRest.java", source);
+
+        assertThat(model.outboundCalls()).anyMatch(c ->
+                "POST".equals(c.httpMethod())
+                        && c.clientType().toLowerCase().contains("workbench"));
     }
 }

@@ -9,6 +9,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -21,6 +22,9 @@ class WebhookControllerTest {
     @MockBean GitHubSignatureValidator validator;
     @MockBean JobDecomposer decomposer;
     @MockBean KafkaJobPublisher publisher;
+    @MockBean io.testseer.backend.observability.TestSeerMetrics metrics;
+    @MockBean io.testseer.backend.ingestion.GitHubSourceFetcher sourceFetcher;
+    @MockBean WebhookCatalogRegistrar catalogRegistrar;
 
     private static final String PULL_REQUEST_PAYLOAD = """
             {
@@ -41,6 +45,7 @@ class WebhookControllerTest {
     @Test
     void pullRequest_withValidSignature_returns202() throws Exception {
         when(validator.isValid(any(), any())).thenReturn(true);
+        when(sourceFetcher.fetchPullRequestChangedFiles(any(), any(), anyInt())).thenReturn(List.of());
         when(decomposer.decompose(any(), any(), any(), any(), any(), any()))
                 .thenReturn(List.of());
 

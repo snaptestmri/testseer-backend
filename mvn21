@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export JAVA_HOME="$(/usr/libexec/java_home -v 21)"
+COLIMA_SOCK="${HOME}/.colima/default/docker.sock"
+if [ -S "${COLIMA_SOCK}" ] && [ ! -S /var/run/docker.sock ]; then
+  export DOCKER_HOST="unix://${COLIMA_SOCK}"
+  export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE="${COLIMA_SOCK}"
+  export DOCKER_API_VERSION="1.44"
+  export TESTCONTAINERS_RYUK_DISABLED="true"
+  cat > "${HOME}/.testcontainers.properties" <<EOF
+docker.host=unix://${COLIMA_SOCK}
+docker.socket.override=${COLIMA_SOCK}
+testcontainers.reuse.enable=true
+EOF
+fi
+exec mvn "$@"

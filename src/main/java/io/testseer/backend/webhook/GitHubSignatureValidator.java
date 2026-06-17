@@ -1,5 +1,6 @@
 package io.testseer.backend.webhook;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -15,7 +16,7 @@ public class GitHubSignatureValidator {
 
     private final byte[] secretBytes;
 
-    // Public constructor for Spring (with @Value annotation for DI)
+    @Autowired
     public GitHubSignatureValidator(
             @Value("${testseer.github.webhook-secret:changeme}") String secret) {
         this.secretBytes = secret.getBytes(StandardCharsets.UTF_8);

@@ -104,4 +104,22 @@ class JavaParserSemanticTest {
         assertThat(model.publicMethods().get(0).javadoc()).isNull();
         assertThat(model.publicMethods().get(0).thrownExceptions()).isEmpty();
     }
+
+    @Test
+    void nullOrBlankSource_returnsParseErrorWithoutThrowing() {
+        ParsedModel nullContent = parser.parse("Empty.java", null);
+        assertThat(nullContent.parseError()).isTrue();
+        assertThat(nullContent.parseErrorDetail()).contains("null");
+
+        ParsedModel blankContent = parser.parse("Empty.java", "   ");
+        assertThat(blankContent.parseError()).isTrue();
+        assertThat(blankContent.parseErrorDetail()).contains("empty");
+    }
+
+    @Test
+    void syntacticallyInvalidSource_returnsParseError() {
+        ParsedModel model = parser.parse("Broken.java", "public class { !!!");
+        assertThat(model.parseError()).isTrue();
+        assertThat(model.parseErrorDetail()).isNotBlank();
+    }
 }

@@ -1,0 +1,13 @@
+{
+  "title": "RedeemRequest",
+  "type": "object",
+  "properties": {
+    "offerIds": {
+      "type": "array"
+    },
+    "partnerId": {
+      "type": "string"
+    }
+  },
+  "required": ["offerIds"]
+}

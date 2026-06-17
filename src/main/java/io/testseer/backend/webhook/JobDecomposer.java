@@ -1,5 +1,6 @@
 package io.testseer.backend.webhook;
 
+import io.testseer.backend.config.WorkspaceCatalogService;
 import io.testseer.backend.registry.ServiceEntry;
 import io.testseer.backend.registry.ServiceRegistryService;
 import org.springframework.stereotype.Component;
@@ -15,9 +16,13 @@ import java.util.UUID;
 public class JobDecomposer {
 
     private final ServiceRegistryService registryService;
+    private final WorkspaceCatalogService workspaceCatalog;
 
-    public JobDecomposer(ServiceRegistryService registryService) {
+    public JobDecomposer(
+            ServiceRegistryService registryService,
+            WorkspaceCatalogService workspaceCatalog) {
         this.registryService = registryService;
+        this.workspaceCatalog = workspaceCatalog;
     }
 
     public List<IngestionJob> decompose(
@@ -32,14 +37,7 @@ public class JobDecomposer {
         Map<String, List<String>> serviceToFiles = new LinkedHashMap<>();
 
         for (String file : changedFiles) {
-            for (ServiceEntry svc : registered) {
-                boolean matches = svc.sourceRoots().stream()
-                        .anyMatch(root -> file.startsWith(root + "/") || file.equals(root));
-                if (matches) {
-                    serviceToFiles.computeIfAbsent(svc.serviceId(), k -> new ArrayList<>()).add(file);
-                    break;
-                }
-            }
+            assignFile(orgId, repo, file, registered, serviceToFiles);
         }
 
         return serviceToFiles.entrySet().stream()
@@ -53,8 +51,46 @@ public class JobDecomposer {
                         entry.getValue(),
                         prNumber,
                         Instant.now(),
-                        1
+                        1,
+                        null
                 ))
                 .toList();
+    }
+
+    private void assignFile(
+            String orgId,
+            String repo,
+            String file,
+            List<ServiceEntry> registered,
+            Map<String, List<String>> serviceToFiles) {
+
+        for (ServiceEntry svc : registered) {
+            if (matchesAnyRoot(file, effectiveSourceRoots(orgId, svc))) {
+                serviceToFiles.computeIfAbsent(svc.serviceId(), k -> new ArrayList<>()).add(file);
+                return;
+            }
+        }
+    }
+
+    List<String> effectiveSourceRoots(String orgId, ServiceEntry svc) {
+        return workspaceCatalog.resolveRepoProfile(orgId, svc.repo())
+                .map(WorkspaceCatalogService.IndexProfile::sourceRoots)
+                .filter(roots -> roots != null && !roots.isEmpty())
+                .orElse(svc.sourceRoots());
+    }
+
+    static boolean matchesAnyRoot(String file, List<String> roots) {
+        if (roots == null || roots.isEmpty()) {
+            return false;
+        }
+        for (String root : roots) {
+            if (root == null || root.isBlank()) {
+                continue;
+            }
+            if (file.equals(root) || file.startsWith(root + "/")) {
+                return true;
+            }
+        }
+        return false;
     }
 }

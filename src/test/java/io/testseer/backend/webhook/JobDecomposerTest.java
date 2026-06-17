@@ -1,5 +1,6 @@
 package io.testseer.backend.webhook;
 
+import io.testseer.backend.config.WorkspaceCatalogService;
 import io.testseer.backend.registry.ServiceEntry;
 import io.testseer.backend.registry.ServiceRegistryService;
 import org.junit.jupiter.api.Test;
@@ -10,6 +11,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
@@ -19,6 +21,9 @@ class JobDecomposerTest {
 
     @Mock
     ServiceRegistryService registryService;
+
+    @Mock
+    WorkspaceCatalogService workspaceCatalog;
 
     @InjectMocks
     JobDecomposer decomposer;
@@ -82,5 +87,36 @@ class JobDecomposerTest {
 
         assertThat(jobs).hasSize(1);
         assertThat(jobs.get(0).changedFiles()).hasSize(2);
+    }
+
+    @Test
+    void decompose_matchesOpenApiJsonViaWorkspaceSourceRoots() {
+        ServiceEntry apisCatalog = new ServiceEntry(
+                "apis-svc", "quotient", "riq-platform-apis-optimus", "riq-platform-apis-optimus",
+                "library", "UNKNOWN",
+                List.of("src/main/java"),
+                List.of(),
+                null, true, Instant.now(), Instant.now());
+
+        when(registryService.listAll()).thenReturn(List.of(apisCatalog));
+        when(workspaceCatalog.resolveRepoProfile("quotient", "riq-platform-apis-optimus"))
+                .thenReturn(Optional.of(new WorkspaceCatalogService.IndexProfile(
+                        "optimus-platform-apis",
+                        "riq-platform-apis-optimus",
+                        "riq-platform-apis-optimus",
+                        "library",
+                        List.of("reference", "Common/Models"),
+                        false,
+                        true,
+                        List.of(),
+                        List.of())));
+
+        List<IngestionJob> jobs = decomposer.decompose(
+                "quotient", "riq-platform-apis-optimus", "abc123", "PR", 7,
+                List.of("reference/Offers/Offers-APIs.v1.json"));
+
+        assertThat(jobs).hasSize(1);
+        assertThat(jobs.get(0).serviceId()).isEqualTo("apis-svc");
+        assertThat(jobs.get(0).changedFiles()).containsExactly("reference/Offers/Offers-APIs.v1.json");
     }
 }

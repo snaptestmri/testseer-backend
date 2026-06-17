@@ -1,15 +1,16 @@
 # TestSeer Central Backend — Phase 1 System Architecture
 
 > **Status:** Canonical  
-> **Last verified:** 2026-06-05  
-> **Supersedes:** Ad-hoc backend notes; complements OpenAPI for endpoint details
+> **Last verified:** 2026-06-12  
+> **Supersedes:** Ad-hoc backend notes; complements OpenAPI for endpoint details  
+> **Feature E2E docs:** [features/README.md](features/README.md)
 
-**Date:** 2026-05-21
-**Phase:** Phase 1 (Weeks 3–6): Platform MVP
-**Source:** TestSeer_Phase1_User_Stories.md
+**Date:** 2026-05-21 (updated 2026-06-12 for Option C + index clear)  
+**Phase:** Phase 1 (Weeks 3–6): Platform MVP  
+**Source:** TestSeer_Phase1_User_Stories.md  
 **Decisions recorded in:** TestSeer_Central_Backend_PRD.md (Appendix A)
 
-**Implementation (2026-06-05):** Backend MVP and MCP are runnable locally. See [CURRENT_STATUS.md](../../docs/CURRENT_STATUS.md). Primary API-backed surface is **MCP (Cursor)**; IntelliJ plugin REST integration is **not** built. `GET /v1/gaps` and `GET /v1/graph/cross-service` are **not** exposed.
+**Implementation (2026-06-15):** Backend MVP, Option C messaging flow, index clear, MCP (**16 tools**), consistency hints (structured API + cross-repo trace-root aggregate), portfolio gaps, and **P16 REST hardening (R1–R4)** are runnable locally. Unified `ApiError` responses, OpenAPI CI gate, messaging freshness HTTP parity, and JSON service descriptions. See [CURRENT_STATUS.md](../../docs/CURRENT_STATUS.md) and [TestSeer_REST_API_Design.md](TestSeer_REST_API_Design.md). Primary API-backed surface is **MCP (Cursor)**; IntelliJ plugin REST integration is **not** built. `GET /v1/graph/cross-service-boundary` is shipped; cross-repo `consistencyHints[]` on subscriber hops and report root shipped (BL-037/038-code).
 
 ---
 
@@ -17,10 +18,11 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Surfaces (2026-06-05)                                              │
+│  Surfaces (2026-06-12)                                              │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │
 │  │ MCP (Cursor) │  │ IntelliJ     │  │ CLI / Maven  │               │
-│  │  [shipped]   │  │ [local PSI]  │  │ [not wired]  │               │
+│  │ 16 tools     │  │ [local PSI]  │  │ [not wired]  │               │
+│  │  [shipped]   │  │              │  │              │               │
 │  └──────┬───────┘  └──────────────┘  └──────────────┘               │
 │         │ REST (JSON)                                               │
 └─────────┼───────────────────────────────────────────────────────────┘
@@ -29,19 +31,22 @@
 │  Query API  (GKE — scales independently)                          │
 │  ┌──────────────────────────────────────────────────────────────┐ │
 │  /facts  /graph  /registry  /status  /impact  /admin              │ │
+│  /v1/facts/pubsub  /v1/graph/event-flow  /v1/gaps/messaging     │ │
+│  POST /admin/index/clear                                          │ │
 │  └───────────────┬──────────────────────────────────────────────┘ │
 │                  │                                                  │
 │         ┌────────┴──────────┐                                      │
 │         ▼                   ▼                                      │
 │     Redis Cache        Postgres (Cloud SQL)                        │
 │     (hot facts)        graph_nodes / graph_edges                   │
-│                        fact tables / registry                      │
+│                        fact tables (V1–V8) / registry            │
 └───────────────────────────────────────────────────────────────────┘
 
 ┌───────────────────────────────────────────────────────────────────┐
 │  Ingestion Pipeline  (GKE)                                        │
 │                                                                   │
 │  GitHub ──webhook──▶ Webhook Receiver ──▶ Kafka                  │
+│  Local FS ──admin──▶ LocalIndexTrigger (sync, no Kafka)          │
 │                       (sig validation)    ┌──────────────────┐   │
 │                                           │ testseer.jobs.pr  │   │
 │  Scheduler ──nightly (planned)────────▶   │ testseer.jobs.batch│  │
@@ -50,8 +55,10 @@
 │                                           Analysis Workers (GKE)  │
 │                                           ┌────────────────────┐  │
 │                                           │ JavaParser + Rules  │  │
+│                                           │ MessagingFactOrch.  │  │
+│                                           │ (YAML/proto/gates)  │  │
 │                                           │ Peripheral Detector │  │
-│                                           │ Fact Normalizer     │  │
+│                                           │ IndexingOrchestrator│  │
 │                                           └────────┬───────────┘  │
 │                                                    │              │
 │                              ┌─────────────────────┴──────────┐  │
@@ -138,7 +145,7 @@
 ```json
 {
   "jobId": "uuid",
-  "jobType": "PR | PUSH | NIGHTLY",
+  "jobType": "PR | PUSH | NIGHTLY | MANUAL | LOCAL",
   "orgId": "example-org",
   "repo": "order-service",
   "serviceId": "svc-orders-001",
@@ -174,9 +181,10 @@ Consume job
     │
     ▼
 Fetch source files from GitHub API (changed files only for incremental; all for baseline)
+    │   Local index: LocalDirectoryFetcher + ConfigFileFetcher (yaml, proto)
     │
     ▼
-Parse with JavaParser + SymbolSolver
+IndexingOrchestrator (JavaParser + MessagingFactOrchestrator)
     │
     ▼
 Extract facts:
@@ -184,14 +192,15 @@ Extract facts:
   ├── Constructor + field dependencies
   ├── Outbound calls (RestClient, WebClient, RestTemplate, Feign)
   ├── Class/method annotations
-  └── Peripheral detection (Tier 1 / 2 / 3 classification)
+  ├── Peripheral detection (Tier 1 / 2 / 3 classification)
+  └── Option C messaging (yaml Pub/Sub, proto schemas, DB access, gates)
     │
     ▼
 Normalise to FactBatch (schema-versioned)
     │
     ▼
 Atomic dual-write:
-  ├── Postgres: fact tables + graph edges (see §4)
+  ├── Postgres: fact tables + graph edges (HTTP + messaging projectors)
   └── MongoDB: raw ParsedModel document
     │
     ▼
@@ -247,6 +256,9 @@ See §4 for full schema. Key design decisions:
 | `DEPENDS_ON` | Class → Class (constructor / field dependency) |
 | `OUTBOUND_TO` | Endpoint → Endpoint (cross-service HTTP call) |
 | `USES_TYPE` | Service → SharedType (shared library type usage) |
+| `PUBLISHES_TO` | Publisher class → TOPIC (Option C) |
+| `SUBSCRIBES_TO` | Subscriber class → SUBSCRIPTION (Option C) |
+| `GUARDED_BY` | Handler → flow gate (Option C) |
 
 **Traversal queries** (all implemented as Postgres recursive CTEs; see Phase 0 spike):
 
@@ -277,18 +289,19 @@ All cross-service boundary CTEs use `WITH RECURSIVE start_svc AS (SELECT service
 
 **Cache key structure:** `testseer:{orgId}:{repo}:{serviceId}:{queryType}:{params_hash}`
 
-**Invalidation trigger:** Kafka consumer in Query API process listens on an internal `testseer.index.complete` topic; on receipt, invalidates all cache keys for the affected `(orgId, repo, serviceId)`.
+**Invalidation trigger:** `IndexCompleteNotifier` calls `CacheService.invalidate(orgId, repo, serviceId)` when indexing finishes or an admin clear runs (same JVM as the worker or API). Multi-replica deployments also use GCP Pub/Sub topic `testseer-index-complete` → subscription `testseer-index-complete-sub` (`CacheInvalidationListener`, enabled with `testseer.pubsub.enabled=true`). Kafka is used for **index jobs only**, not cache invalidation.
 
-**TTL:** 1 hour (safety net only — primary invalidation is event-driven).
+**TTL:** 1 hour (`testseer.cache.ttl-seconds`, safety net — primary invalidation is event-driven).
 
 **Cache-aside pattern:**
 1. Query API checks Redis
-2. Cache hit → return immediately (target < 50ms)
+2. Cache hit → return cached payload immediately (target < 50ms)
 3. Cache miss → query Postgres, write to Redis, return
+4. Redis read/write failure → log WARN, bypass cache, query Postgres (non-fatal)
 
 **Not cached:**
 - Registry CRUD endpoints
-- Freshness metadata (`indexed_at`, `commit_sha`) — always read from Postgres to ensure accuracy
+- Freshness metadata (`indexed_at`, `commit_sha`, `freshnessStatus`) — always read from Postgres even on cache hit
 
 ---
 
@@ -311,7 +324,7 @@ All cross-service boundary CTEs use `WITH RECURSIVE start_svc AS (SELECT service
 | `GET` | `/v1/graph/shared-type` | Shared type resolution by `symbol_fqn` | Yes | Yes |
 | `GET` | `/v1/graph/type-fanout` | Type usage fan-out | Yes | Yes |
 | — | `/v1/graph/cross-service` | Cross-service boundary traversal | — | **No REST** (service method only) |
-| `GET` | `/v1/impact/pr` | PR impact analysis | No | Yes |
+| `GET` | `/v1/impact/pr` | PR impact analysis | Yes (`impact:pr`) | Yes |
 | `GET` | `/v1/services/{id}/description` | LLM service description | Yes | Yes |
 | `POST` | `/v1/services/{id}/description` | Regenerate description | — | Yes |
 | `GET` | `/v1/status/{serviceId}` | Index status and freshness metadata | No | Yes |
@@ -323,6 +336,16 @@ All cross-service boundary CTEs use `WITH RECURSIVE start_svc AS (SELECT service
 | `POST` | `/admin/index/{serviceId}` | On-demand re-index | — | Yes |
 | `POST` | `/admin/index/local` | Index local filesystem | — | Yes |
 | `POST` | `/admin/discover` | GitHub org discovery | — | Yes |
+| `POST` | `/admin/index/clear` | Clear indexed facts (SERVICE/MESSAGING/ORG) | — | Yes |
+| `DELETE` | `/admin/index/{serviceId}` | Clear one service (shortcut) | — | Yes |
+| `GET` | `/v1/facts/pubsub` | Pub/Sub inventory (Option C-P1) | Yes | Yes |
+| `GET` | `/v1/facts/message-schema` | Message schemas (C-P2) | Yes | Yes |
+| `GET` | `/v1/facts/data-access` | DB touchpoints (C-P3) | Yes | Yes |
+| `GET` | `/v1/facts/validation-hints` | Validation hints (C-P4) | Yes | Yes |
+| `GET` | `/v1/gaps/messaging` | Messaging gaps (C-P5) | Yes | Yes |
+| `GET` | `/v1/facts/gates` | Flow gates (C-P6) | Yes | Yes |
+| `GET` | `/v1/graph/event-flow` | Single-service event trace | Yes | Yes |
+| `GET` | `/v1/graph/event-flow/cross-repo` | Cross-repo BFS trace | Yes | Yes |
 | — | `/v1/gaps` | Portfolio test gap report | — | **Planned (P12)** |
 
 **Standard response envelope:**
@@ -339,24 +362,51 @@ All cross-service boundary CTEs use `WITH RECURSIVE start_svc AS (SELECT service
 
 **Freshness status logic:**
 
-| Status | Condition |
-|---|---|
-| `CURRENT` | `indexed_at` within stale threshold (default 1 hour) |
-| `STALE` | `indexed_at` beyond stale threshold |
-| `INDEXING` | Job in-flight in Kafka for this service |
-| `NOT_INDEXED` | No facts found for this serviceId |
+| Status | Condition | HTTP (service-scoped query endpoints) |
+|---|---|---|
+| `CURRENT` | `indexed_at` within stale threshold (default 1 hour) | **200** + envelope |
+| `STALE` | `indexed_at` beyond stale threshold | **200** + envelope |
+| `INDEXING` | Job in-flight in Kafka for this service | **202** + envelope |
+| `NOT_INDEXED` | No facts found for this serviceId | **404** + envelope (`freshnessStatus: NOT_INDEXED`) |
+
+Implemented via `FreshnessHttp` in `io.testseer.backend.query` — used by `FactQueryController`, `GraphQueryController`, and `MessagingQueryController` (P16 R3).
+
+**Exception:** `GET /v1/status/{serviceId}` always returns **200** with envelope (never 404 for unknown service — use registry lookup separately).
 
 **GCP Pub/Sub integration:**
 - Query API publishes `IndexReadyEvent` to Pub/Sub on successful index completion
 - IntelliJ plugin subscribes and surfaces "fresh index available" banner — no polling required
 
-**Error responses:**
+**Error responses (P16 R2 — canonical `ApiError`):**
 
-| Scenario | HTTP | Body |
-|---|---|---|
-| ServiceId not registered | 404 | `{"error": "NOT_REGISTERED", "message": "...", "hint": "Register via POST /registry/services"}` |
-| Index in progress | 202 | `{"freshnessStatus": "INDEXING", "lastKnownFacts": {...}}` |
-| Upstream Postgres unavailable | 503 | `{"error": "STORE_UNAVAILABLE"}` |
+All command, admin, registry, and artifact endpoints return JSON on failure:
+
+```json
+{
+  "error": "NOT_FOUND | CONFLICT | VALIDATION_ERROR | SERVICE_UNAVAILABLE | INTERNAL_ERROR",
+  "message": "Human-readable detail",
+  "hint": "Optional recovery action",
+  "requestId": "Echo of X-Request-Id header"
+}
+```
+
+| Scenario | HTTP | `error` enum | Notes |
+|---|---|---|---|
+| Unknown `serviceId` (registry/admin) | 404 | `NOT_FOUND` | Includes `hint` to register |
+| Duplicate registry entry | 409 | `CONFLICT` | Was legacy `DUPLICATE_SERVICE` |
+| Index job already in flight | 409 | `CONFLICT` | Poll `/v1/status/{serviceId}` |
+| Bean validation failure | 400 | `VALIDATION_ERROR` | Field messages in `details` |
+| Description not stored | 404 | `NOT_FOUND` | No `metadata.description` on service |
+| Service never indexed (query) | 404 | _(envelope)_ | `ResponseEnvelope.notIndexed()` — not `ApiError` |
+| Index in progress (query) | 202 | _(envelope)_ | `freshnessStatus: INDEXING` in body |
+| Unhandled server fault | 500 | `INTERNAL_ERROR` | Full trace logged server-side |
+
+Global handler: `TestSeerExceptionHandler` (`io.testseer.backend.api`). Per-controller `@ExceptionHandler` methods removed.
+
+**OpenAPI governance (P16 R1):**
+
+- Checked-in [`openapi.yaml`](openapi.yaml) exported from springdoc via `OpenApiExportTest`
+- CI drift gate: `scripts/openapi-governance-check.sh` → `OpenApiGovernanceTest`
 
 ---
 
@@ -572,6 +622,11 @@ CREATE INDEX idx_edges_from             ON graph_edges(from_node, edge_type);
 CREATE INDEX idx_edges_to               ON graph_edges(to_node, edge_type);
 CREATE INDEX idx_nodes_fqn              ON graph_nodes(symbol_fqn);
 CREATE INDEX idx_nodes_service          ON graph_nodes(org_id, service);
+
+-- Option C: Messaging flow facts (V8)
+-- pubsub_resource_facts, message_schema_facts, data_access_facts,
+-- flow_gate_facts, validation_hint_facts, pubsub_verification_facts
+-- See db/migration/V8__messaging_flow_facts.sql and features/07-option-c-messaging-flow.md
 ```
 
 ### 4.2 MongoDB Collection: `parsed_models`
@@ -669,6 +724,22 @@ GKE Cluster (testseer-prod)
 **Decision:** Registry CRUD endpoints are served by the Query API process, not a separate Registry service.
 **Rationale:** Phase 1 scope. Registry operations are infrequent (engineering lead configuration, not hot path). A separate service adds operational overhead without benefit at this scale.
 **Consequence:** If registry write load grows significantly (e.g. automated repo onboarding), extract to a dedicated service in a future phase.
+
+---
+
+### ADR-006: Option C Messaging — Query-Time Cross-Repo Join
+**Status:** Accepted (2026-06-12)
+**Decision:** Index each Git repo as a separate `service_id`; join Pub/Sub hops at query time by `short_id` + `env_lane` and topic-stem heuristics. Do not merge repos at index time.
+**Rationale:** Offer-event flows span 4+ repos with independent release cycles. Per-repo index matches existing local-index scripts and avoids monolithic composite service IDs.
+**Consequence:** Cross-repo trace quality depends on indexing the full bundle; shared TOPIC graph nodes may persist after partial clear. Live GCP subscription→topic verification (MSG-10 v1) is opt-in at query time — see [features/19-live-pubsub-verify.md](features/19-live-pubsub-verify.md).
+
+---
+
+### ADR-007: REST API — `ApiError` + OpenAPI CI Gate (P16)
+**Status:** Accepted and implemented (2026-06-12, R1–R3)
+**Decision:** Adopt canonical `ApiError` JSON with string enum (not Optimus numeric codes); global `TestSeerExceptionHandler`; `FreshnessHttp` for consistent 404/202/200 on all service-scoped queries; springdoc-exported `openapi.yaml` with CI drift gate.
+**Rationale:** MCP agents and curl scripts need machine-parseable failures; messaging queries must not return 200 while indexing. Manual YAML editing caused spec drift.
+**Consequence:** Breaking changes for clients expecting plain-text errors or description body; duplicate registry uses `CONFLICT` not `DUPLICATE_SERVICE`. Header-based API versioning (R4) deferred. Full design: [TestSeer_REST_API_Design.md](TestSeer_REST_API_Design.md).
 
 ---
 

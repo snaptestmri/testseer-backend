@@ -1,5 +1,6 @@
 package io.testseer.backend.admin;
 
+import io.testseer.backend.config.ObservabilityProperties;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -7,7 +8,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import io.testseer.backend.registry.ServiceNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,9 +17,12 @@ import org.springframework.web.bind.annotation.*;
 public class IndexTriggerController {
 
     private final IndexTriggerService triggerService;
+    private final ObservabilityProperties observabilityProperties;
 
-    public IndexTriggerController(IndexTriggerService triggerService) {
+    public IndexTriggerController(IndexTriggerService triggerService,
+                                  ObservabilityProperties observabilityProperties) {
         this.triggerService = triggerService;
+        this.observabilityProperties = observabilityProperties;
     }
 
     @Operation(
@@ -42,16 +45,9 @@ public class IndexTriggerController {
             @RequestBody(required = false) IndexTriggerRequest request) {
 
         IndexTriggerRequest req = request != null ? request : new IndexTriggerRequest(null);
-        return ResponseEntity.accepted().body(triggerService.trigger(serviceId, req));
-    }
-
-    @ExceptionHandler(ServiceNotFoundException.class)
-    public ResponseEntity<Void> handleNotFound(ServiceNotFoundException ex) {
-        return ResponseEntity.notFound().build();
-    }
-
-    @ExceptionHandler(JobAlreadyInFlightException.class)
-    public ResponseEntity<String> handleConflict(JobAlreadyInFlightException ex) {
-        return ResponseEntity.status(409).body(ex.getMessage());
+        IndexTriggerResponse body = triggerService.trigger(serviceId, req);
+        return ResponseEntity.accepted()
+                .header(observabilityProperties.jobIdHeader(), body.jobId())
+                .body(body);
     }
 }

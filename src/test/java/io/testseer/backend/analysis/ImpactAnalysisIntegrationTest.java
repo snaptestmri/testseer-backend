@@ -1,5 +1,7 @@
 package io.testseer.backend.analysis;
 
+import io.testseer.backend.AbstractIntegrationTest;
+import io.testseer.backend.IntegrationTestDb;
 import io.testseer.backend.graph.GraphFactProjector;
 import io.testseer.backend.graph.GraphNodeRepository;
 import io.testseer.backend.ingestion.DualWriteService;
@@ -11,32 +13,15 @@ import io.testseer.backend.registry.ServiceRegistryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.testcontainers.containers.MongoDBContainer;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(properties = {
-    "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration," +
-        "com.google.cloud.spring.autoconfigure.pubsub.GcpPubSubAutoConfiguration"
-})
-@Testcontainers
-class ImpactAnalysisIntegrationTest {
-
-    @Container @ServiceConnection
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16");
-
-    @Container @ServiceConnection
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7");
-
+class ImpactAnalysisIntegrationTest extends AbstractIntegrationTest {
     @Autowired ImpactAnalysisService impactService;
     @Autowired DualWriteService dualWriteService;
     @Autowired GraphFactProjector graphProjector;
@@ -50,19 +35,14 @@ class ImpactAnalysisIntegrationTest {
 
     @BeforeEach
     void setup() {
-        db.sql("DELETE FROM graph_edges").update();
-        db.sql("DELETE FROM graph_nodes").update();
-        db.sql("DELETE FROM outbound_call_facts").update();
-        db.sql("DELETE FROM symbol_facts").update();
-        db.sql("DELETE FROM analysis_runs").update();
-        db.sql("DELETE FROM service_registry").update();
+        IntegrationTestDb.clearCoreFacts(db);
 
         var reg = svcRegistry.register(new RegistrationRequest(
                 "acme", "orders", "orders", "MAVEN", "service",
                 List.of("src/main/java"), List.of("src/test/java"), null));
         serviceId = reg.serviceId();
 
-        ParsedModel controller = new ParsedModel(
+        ParsedModel controller = ParsedModel.of(
                 "src/main/java/io/orders/OrderController.java",
                 "io.orders.OrderController",
                 List.of("RestController"),
@@ -71,14 +51,14 @@ class ImpactAnalysisIntegrationTest {
                 List.of(), false, null,
                 null, List.of(), List.of());
 
-        ParsedModel controllerTest = new ParsedModel(
+        ParsedModel controllerTest = ParsedModel.of(
                 "src/test/java/io/orders/OrderControllerTest.java",
                 "io.orders.OrderControllerTest",
                 List.of(), List.of(), List.of(),
                 List.of(), List.of(), false, null,
                 null, List.of(), List.of());
 
-        FactBatch batch = new FactBatch(
+        FactBatch batch = FactBatch.core(
                 "job-1", "acme", "orders", serviceId, commitSha, "DELTA",
                 java.util.stream.Stream.concat(
                         factExtractor.extractSymbolFacts(controller).stream(),
@@ -97,7 +77,7 @@ class ImpactAnalysisIntegrationTest {
                 .param("jobId", "job-1")
                 .param("svcId", serviceId)
                 .param("sha", commitSha)
-                .param("now", Instant.now())
+                .param("now", Timestamp.from(Instant.now()))
                 .update();
     }
 
@@ -121,7 +101,7 @@ class ImpactAnalysisIntegrationTest {
                 "acme", "billing", "billing", "MAVEN", "service",
                 List.of("src/main/java"), List.of("src/test/java"), null));
 
-        ParsedModel billingClient = new ParsedModel(
+        ParsedModel billingClient = ParsedModel.of(
                 "src/main/java/io/billing/BillingClient.java",
                 "io.billing.BillingClient",
                 List.of(), List.of(), List.of(),
@@ -131,11 +111,11 @@ class ImpactAnalysisIntegrationTest {
                 false, null,
                 null, List.of(), List.of());
 
-        FactBatch billingBatch = new FactBatch(
+        FactBatch billingBatch = FactBatch.create(
                 "job-2", "acme", "billing", billing.serviceId(), commitSha, "BASELINE",
                 factExtractor.extractSymbolFacts(billingClient),
                 factExtractor.extractOutboundCallFacts(billingClient),
-                List.of(), List.of());
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
 
         dualWriteService.write(billingBatch, List.of(billingClient));
         graphProjector.project(billingBatch, List.of(billingClient));

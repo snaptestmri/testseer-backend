@@ -1,6 +1,10 @@
 package io.testseer.backend.ingestion;
 
-import io.testseer.backend.graph.GraphFactProjector;
+import io.testseer.backend.config.WorkspaceCatalogService;
+import io.testseer.backend.github.PrImpactCommentService;
+import io.testseer.backend.ingestion.messaging.YamlPubSubExtractor;
+import io.testseer.backend.observability.IndexingPhaseTimer;
+import io.testseer.backend.observability.MdcContext;
 import io.testseer.backend.webhook.IngestionJob;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,84 +18,78 @@ public class WorkerPipeline {
     private static final Logger log = LoggerFactory.getLogger(WorkerPipeline.class);
 
     private final GitHubSourceFetcher fetcher;
-    private final JavaParserService parserService;
-    private final FactExtractor factExtractor;
-    private final PeripheralDetector peripheralDetector;
-    private final DualWriteService dualWriteService;
-    private final GraphFactProjector graphProjector;
+    private final ConfigFileFetcher configFileFetcher;
+    private final IndexingOrchestrator indexingOrchestrator;
     private final AnalysisRunTracker runTracker;
+    private final WorkspaceCatalogService workspaceCatalog;
+    private final PomFileFetcher pomFileFetcher;
+    private final PrImpactCommentService prImpactCommentService;
 
     public WorkerPipeline(GitHubSourceFetcher fetcher,
-                          JavaParserService parserService,
-                          FactExtractor factExtractor,
-                          PeripheralDetector peripheralDetector,
-                          DualWriteService dualWriteService,
-                          GraphFactProjector graphProjector,
-                          AnalysisRunTracker runTracker) {
+                          ConfigFileFetcher configFileFetcher,
+                          PomFileFetcher pomFileFetcher,
+                          IndexingOrchestrator indexingOrchestrator,
+                          AnalysisRunTracker runTracker,
+                          WorkspaceCatalogService workspaceCatalog,
+                          PrImpactCommentService prImpactCommentService) {
         this.fetcher = fetcher;
-        this.parserService = parserService;
-        this.factExtractor = factExtractor;
-        this.peripheralDetector = peripheralDetector;
-        this.dualWriteService = dualWriteService;
-        this.graphProjector = graphProjector;
+        this.configFileFetcher = configFileFetcher;
+        this.pomFileFetcher = pomFileFetcher;
+        this.indexingOrchestrator = indexingOrchestrator;
         this.runTracker = runTracker;
+        this.workspaceCatalog = workspaceCatalog;
+        this.prImpactCommentService = prImpactCommentService;
     }
 
     public void process(IngestionJob job) {
+        MdcContext.putJob(job);
+        IndexingPhaseTimer timer = new IndexingPhaseTimer();
         runTracker.markQueued(job);
         runTracker.markRunning(job.jobId());
-        try {
-            List<GitHubSourceFetcher.FetchedFile> files = fetcher.fetchJavaFiles(
-                    job.orgId(), job.repo(), job.commitSha(), job.changedFiles());
+        List<String> changed = job.changedFiles() != null ? job.changedFiles() : List.of();
+        List<GitHubSourceFetcher.FetchedFile> javaFiles = changed.isEmpty()
+                ? List.of()
+                : fetcher.fetchJavaFiles(job.orgId(), job.repo(), job.commitSha(), changed);
+        timer.lap("fetchJava");
 
-            List<ParsedModel> models = files.stream()
-                    .map(f -> parserService.parse(f.path(), f.content()))
-                    .toList();
+        List<GitHubSourceFetcher.FetchedFile> ddlFiles = changed.isEmpty()
+                ? List.of()
+                : fetcher.fetchDdlFiles(job.orgId(), job.repo(), job.commitSha(), changed);
+        timer.lap("fetchDdl");
 
-            List<FactBatch.SymbolFact> symbolFacts = models.stream()
-                    .flatMap(m -> factExtractor.extractSymbolFacts(m).stream())
-                    .toList();
-            List<FactBatch.SymbolFact> methodFacts = models.stream()
-                    .flatMap(m -> factExtractor.extractMethodFacts(m).stream())
-                    .toList();
-            List<FactBatch.SymbolFact> enumFacts = models.stream()
-                    .flatMap(m -> factExtractor.extractEnumFacts(m).stream())
-                    .toList();
-            List<FactBatch.SymbolFact> allSymbolFacts = new java.util.ArrayList<>(symbolFacts);
-            allSymbolFacts.addAll(methodFacts);
-            allSymbolFacts.addAll(enumFacts);
-            List<FactBatch.OutboundCallFact> outboundFacts = models.stream()
-                    .flatMap(m -> factExtractor.extractOutboundCallFacts(m).stream())
-                    .toList();
-            List<FactBatch.PeripheralFact> peripheralFacts = models.stream()
-                    .flatMap(m -> peripheralDetector.detect(m).stream())
-                    .toList();
-            List<FactBatch.UnsupportedConstructFact> unsupported = models.stream()
-                    .flatMap(m -> factExtractor.extractUnsupportedConstructFacts(m).stream())
-                    .toList();
+        List<YamlPubSubExtractor.ConfigFile> configFiles =
+                configFileFetcher.fetchFromGitHubPaths(
+                        fetcher, job.orgId(), job.repo(), job.commitSha(),
+                        configFileFetcher.filterConfigPaths(changed));
+        timer.lap("fetchConfig");
 
-            if (!unsupported.isEmpty()) {
-                log.warn("Job {} has {} unsupported constructs in service {}",
-                        job.jobId(), unsupported.size(), job.serviceId());
-            }
+        boolean indexOpenApi = workspaceCatalog.findCatalogLibraryByRepo(job.orgId(), job.repo())
+                .map(c -> c.indexOpenApi())
+                .orElse(false);
+        List<GitHubSourceFetcher.FetchedFile> openApiFiles = indexOpenApi && !changed.isEmpty()
+                ? fetcher.fetchJsonFiles(job.orgId(), job.repo(), job.commitSha(), changed)
+                : List.of();
+        timer.lap("fetchOpenApi");
 
-            String snapshotType = "NIGHTLY".equals(job.jobType()) || "MANUAL".equals(job.jobType())
-                    ? "BASELINE" : "DELTA";
+        List<GitHubSourceFetcher.FetchedFile> pomFiles = pomFileFetcher.fetchPomFiles(
+                fetcher, job.orgId(), job.repo(), job.commitSha(), changed,
+                "NIGHTLY".equals(job.jobType()) || "MANUAL".equals(job.jobType()));
+        timer.lap("fetchPom");
 
-            FactBatch batch = new FactBatch(
-                    job.jobId(), job.orgId(), job.repo(), job.serviceId(),
-                    job.commitSha(), snapshotType,
-                    allSymbolFacts, outboundFacts, peripheralFacts, unsupported
-            );
+        String snapshotType = "NIGHTLY".equals(job.jobType()) || "MANUAL".equals(job.jobType())
+                ? "BASELINE" : "DELTA";
 
-            dualWriteService.write(batch, models);
-            graphProjector.project(batch, models);
-            runTracker.markComplete(job.jobId());
-            log.info("Job {} complete: {} symbol facts, {} peripheral facts",
-                    job.jobId(), allSymbolFacts.size(), peripheralFacts.size());
-        } catch (Exception ex) {
-            runTracker.markFailed(job.jobId(), ex.getMessage());
-            throw ex;  // re-throw so Kafka consumer does not acknowledge
-        }
+        IndexingOrchestrator.IndexingResult result = indexingOrchestrator.index(
+                job.jobId(), job.orgId(), job.repo(), job.serviceId(),
+                job.commitSha(), snapshotType, javaFiles, configFiles, ddlFiles, openApiFiles, pomFiles, null);
+        timer.lap("index");
+
+        runTracker.markComplete(job.jobId());
+        log.info("Job {} complete: {} java files, {} pubsub facts, pipeline totalMs={} {}",
+                job.jobId(), result.javaFileCount(),
+                result.batch().pubsubResourceFacts().size(),
+                timer.elapsedMs(), timer.formatPhases());
+
+        prImpactCommentService.onPrJobComplete(job);
     }
 }

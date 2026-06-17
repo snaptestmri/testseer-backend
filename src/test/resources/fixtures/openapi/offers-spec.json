@@ -1,0 +1,59 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Offer Service",
+    "version": "1.0"
+  },
+  "servers": [
+    {
+      "url": "https://apir.receiptiq.com/service"
+    }
+  ],
+  "paths": {
+    "/offers/all": {
+      "post": {
+        "summary": "Get All Offers",
+        "operationId": "post-offers-all",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "AllOffersResponse.v1.json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/offers/redeem": {
+      "post": {
+        "summary": "Redeem Offers",
+        "operationId": "post-offers-redeem",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "RedeemRequest.v1.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "RedeemResponse.v1.json"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

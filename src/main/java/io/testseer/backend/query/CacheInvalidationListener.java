@@ -45,7 +45,8 @@ public class CacheInvalidationListener {
             String serviceId = node.path("serviceId").asText();
 
             cacheService.invalidate(orgId, repo, serviceId);
-            log.info("Cache invalidated for {}/{}/{} via Pub/Sub", orgId, repo, serviceId);
+            log.info("Cache invalidated for {}/{}/{} via Pub/Sub (eventType={})",
+                    orgId, repo, serviceId, node.path("eventType").asText("INDEX_COMPLETE"));
             message.ack();
         } catch (Exception ex) {
             log.error("Failed to process Pub/Sub invalidation message: {}", ex.getMessage());

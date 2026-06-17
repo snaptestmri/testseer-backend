@@ -1,0 +1,2765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>TestSeer Index Visualizer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; min-height: 100vh; }
+
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 24px; background: #161b22; border-bottom: 1px solid #30363d; }
+  header h1 { font-size: 18px; font-weight: 600; color: #f0f6fc; }
+  header h1 span { color: #58a6ff; }
+  .header-meta { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .backend-url { font-size: 12px; color: #8b949e; }
+  .btn { padding: 6px 14px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #e6edf3; cursor: pointer; font-size: 13px; }
+  .btn:hover { background: #30363d; }
+  .btn-primary { background: #238636; border-color: #2ea043; color: #fff; }
+  .btn-primary:hover { background: #2ea043; }
+
+  nav { display: flex; padding: 0 24px; background: #161b22; border-bottom: 1px solid #30363d; }
+  .tab { padding: 10px 18px; font-size: 14px; cursor: pointer; color: #8b949e; border-bottom: 2px solid transparent; }
+  .tab.active { color: #f0f6fc; border-bottom-color: #f78166; }
+  .tab:hover { color: #e6edf3; }
+
+  .view { display: none; padding: 20px 24px; }
+  .view.active { display: block; }
+
+  .stats-bar { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+  .stat-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px 18px; min-width: 110px; cursor: pointer; transition: border-color 0.15s; }
+  .stat-card:hover { border-color: #484f58; }
+  .stat-card.active { border-color: #58a6ff; box-shadow: 0 0 0 1px rgba(88,166,255,0.35); }
+  .stat-card .label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-card .value { font-size: 26px; font-weight: 600; margin-top: 2px; }
+  .stat-card.current .value  { color: #3fb950; }
+  .stat-card.stale .value    { color: #d29922; }
+  .stat-card.indexing .value { color: #58a6ff; }
+  .stat-card.not-indexed .value { color: #8b949e; }
+  .stat-card.total .value    { color: #f0f6fc; }
+
+  .search-bar { margin-bottom: 14px; }
+  .search-bar input { width: 100%; max-width: 400px; background: #21262d; border: 1px solid #30363d; color: #e6edf3; padding: 8px 12px; border-radius: 6px; font-size: 14px; }
+  .service-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+  .service-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px 14px; cursor: pointer; transition: border-color 0.15s; }
+  .service-card:hover { border-color: #58a6ff; }
+  .service-card .svc-name { font-size: 13px; font-weight: 600; color: #f0f6fc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .service-card .svc-meta { font-size: 11px; color: #8b949e; margin-top: 4px; }
+  .svc-triggers { margin-top: 8px; border-top: 1px solid #21262d; padding-top: 6px; max-height: 130px; overflow: hidden; }
+  .svc-triggers-detail { max-height: none; overflow: visible; }
+  .svc-triggers.empty, .svc-triggers.loading { font-size: 10px; color: #484f58; font-style: italic; }
+  .trigger-row { display: flex; gap: 6px; align-items: baseline; margin: 3px 0; font-size: 10px; line-height: 1.4; }
+  .trigger-kind { flex-shrink: 0; font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; color: #58a6ff; background: rgba(88,166,255,0.12); padding: 1px 5px; border-radius: 3px; }
+  .trigger-path { font-family: monospace; color: #c9d1d9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .trigger-more { font-size: 10px; color: #8b949e; margin-top: 2px; }
+  .svc-status { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; margin-top: 6px; }
+  .status-CURRENT     { background: rgba(63,185,80,0.15);  color: #3fb950; }
+  .status-STALE       { background: rgba(210,153,34,0.15); color: #d29922; }
+  .status-INDEXING    { background: rgba(88,166,255,0.15); color: #58a6ff; }
+  .status-NOT_INDEXED { background: rgba(139,148,158,0.15); color: #8b949e; }
+
+  #graph-container { background: #161b22; border: 1px solid #30363d; border-radius: 8px; position: relative; }
+  #graph-svg { width: 100%; height: calc(100vh - 280px); min-height: 400px; display: block; }
+  #graph-detail { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px 16px; margin-top: 12px; display: none; }
+  #graph-detail h3 { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #f0f6fc; }
+  .graph-controls { position: absolute; top: 12px; right: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .graph-controls .btn { font-size: 18px; padding: 4px 10px; }
+  .graph-legend { position: absolute; bottom: 12px; left: 12px; background: rgba(22,27,34,0.92); border: 1px solid #30363d; border-radius: 6px; padding: 10px 14px; font-size: 12px; color: #8b949e; }
+  .graph-legend div { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .graph-tooltip { position: absolute; background: #1c2128; border: 1px solid #30363d; border-radius: 6px; padding: 8px 12px; font-size: 12px; pointer-events: none; display: none; z-index: 10; max-width: 240px; line-height: 1.6; }
+
+  .detail-panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin-top: 16px; }
+  .detail-panel h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: #f0f6fc; }
+  .detail-row { display: flex; gap: 8px; margin: 6px 0; font-size: 13px; }
+  .detail-row .key { color: #8b949e; min-width: 130px; flex-shrink: 0; }
+  .detail-row .val { color: #e6edf3; word-break: break-all; font-family: monospace; font-size: 12px; }
+
+  .loading { text-align: center; padding: 60px; color: #8b949e; font-size: 14px; }
+  .error-msg { background: rgba(248,81,73,0.1); border: 1px solid rgba(248,81,73,0.3); color: #f85149; border-radius: 6px; padding: 12px 16px; font-size: 13px; margin-bottom: 16px; }
+
+  .impact-form { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: flex-end; }
+  .impact-form label { font-size: 12px; color: #8b949e; display: block; margin-bottom: 4px; }
+  .impact-form select, .impact-form input { background: #21262d; border: 1px solid #30363d; color: #e6edf3; padding: 7px 10px; border-radius: 6px; font-size: 13px; min-width: 200px; }
+  .impact-section { margin-bottom: 14px; }
+  .impact-section h4 { font-size: 11px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .impact-tag { display: inline-block; background: #21262d; border: 1px solid #30363d; border-radius: 4px; padding: 3px 8px; font-size: 12px; margin: 3px; font-family: monospace; color: #e6edf3; }
+  .impact-tag.missing { border-color: #f85149; color: #f85149; }
+  .impact-tag.exists  { border-color: #3fb950; color: #3fb950; }
+
+  svg .node circle { stroke-width: 1.5px; cursor: pointer; transition: r 0.1s; }
+  svg .node text { font-size: 10px; fill: #8b949e; pointer-events: none; }
+  svg .link { stroke: #30363d; stroke-width: 1.5px; fill: none; }
+  svg .link.highlighted { stroke: #58a6ff; stroke-width: 2.5px; }
+  svg .link.maven { stroke: #f0883e; stroke-dasharray: 5 3; }
+  svg .link.contains-module { stroke: #484f58; stroke-dasharray: 2 4; }
+  svg .link.depends-artifact { stroke: #d29922; }
+  svg .node.selected circle { stroke: #f0f6fc !important; stroke-width: 2.5px; }
+  svg .node.artifact circle { fill: #d29922; stroke: #d29922; }
+  svg .node.module circle { fill: #238636; stroke: #3fb950; }
+
+  .graph-toolbar { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; align-items: flex-end; }
+  .graph-toolbar label { font-size: 12px; color: #8b949e; display: block; margin-bottom: 4px; }
+  .graph-toolbar select { background: #21262d; border: 1px solid #30363d; color: #e6edf3; padding: 7px 10px; border-radius: 6px; font-size: 13px; min-width: 200px; }
+  #graph-maven-controls { display: none; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+  .maven-dep-row { font-family: monospace; font-size: 11px; color: #c9d1d9; padding: 3px 0; border-bottom: 1px solid #21262d; }
+  .maven-dep-row .linked { color: #f0883e; cursor: pointer; text-decoration: underline; }
+  #maven-tree-split { display: block; }
+  #maven-tree-text-panel { display: none; }
+  #view-graph.maven-tree-mode #maven-tree-split { display: grid; }
+  #view-graph.maven-tree-mode #maven-tree-text-panel { display: block; }
+  #maven-tree-split { grid-template-columns: minmax(300px, 36%) 1fr; gap: 12px; align-items: stretch; }
+  #maven-tree-text-panel h4 { font-size: 11px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  #maven-tree-meta { font-size: 12px; color: #8b949e; margin-bottom: 10px; line-height: 1.5; }
+  #maven-tree-text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #c9d1d9; white-space: pre; line-height: 1.45; margin: 0; }
+  #maven-tree-text .tree-linked { color: #f0883e; }
+  #maven-tree-text .tree-module { color: #3fb950; }
+  svg .link.tree-link { stroke: #484f58; stroke-width: 1.25px; fill: none; }
+  svg .node.tree-node text { font-size: 11px; fill: #c9d1d9; text-anchor: start; }
+
+  /* ── Journey tab ── */
+  .mode-toggle { display:flex; border:1px solid #30363d; border-radius:6px; overflow:hidden; margin-right:6px; }
+  .mode-btn { padding:7px 16px; font-size:13px; background:#21262d; color:#8b949e; cursor:pointer; border:none; border-right:1px solid #30363d; }
+  .mode-btn:last-child { border-right:none; }
+  .mode-btn.active { background:#1f6feb; color:#fff; }
+  .journey-form { display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; align-items:flex-end; }
+  .journey-form label { font-size:12px; color:#8b949e; display:block; margin-bottom:4px; }
+  .journey-form select, .journey-form input[type=text] { background:#21262d; border:1px solid #30363d; color:#e6edf3; padding:7px 10px; border-radius:6px; font-size:13px; min-width:180px; }
+
+  .entry-pipeline { display:flex; align-items:flex-start; gap:0; overflow-x:auto; padding:8px 0 20px; }
+  .entry-catalog { display:grid; grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:10px; padding:8px 0 20px; }
+  .entry-catalog .entry-step { width:auto; }
+  .entry-step { flex-shrink:0; width:210px; }
+  .entry-step-card { background:#1c2128; border:1px solid #30363d; border-radius:8px; padding:12px; margin:0 4px; }
+  .step-num { font-size:10px; font-weight:600; color:#8b949e; text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; }
+  .trigger-kind-badge { display:inline-block; background:#1f6feb22; color:#58a6ff; border:1px solid #1f6feb55; border-radius:4px; padding:2px 7px; font-size:10px; font-weight:600; margin-bottom:6px; }
+  .entry-path { font-family:monospace; font-size:12px; color:#f0f6fc; margin-bottom:6px; word-break:break-all; }
+  .entry-handler { font-family:monospace; font-size:10px; color:#6e7681; margin-bottom:8px; word-break:break-all; }
+  .db-row { display:flex; align-items:baseline; gap:5px; font-size:11px; margin:3px 0; font-family:monospace; }
+  .db-read  { color:#58a6ff; }
+  .db-write { color:#f0883e; }
+  .gate-row { display:flex; align-items:baseline; gap:5px; font-size:11px; margin:3px 0; color:#e3b341; font-family:monospace; }
+  .step-arrow { display:flex; align-items:center; padding-top:36px; color:#484f58; font-size:22px; flex-shrink:0; user-select:none; }
+
+  .swimlane-wrap { overflow-x:auto; }
+  .swimlane-table { border-collapse:collapse; }
+  .swimlane-table th { font-weight:500; }
+  .topic-bubble { display:inline-block; background:#1f3a5f; border:1px solid #1f6feb; border-radius:6px; padding:4px 10px; font-size:11px; color:#58a6ff; font-family:monospace; white-space:nowrap; }
+  .lane-label { background:#1c2128; border:1px solid #30363d; border-radius:6px; padding:6px 10px; font-size:12px; font-weight:600; color:#f0f6fc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:7px; }
+  .lane-cell { height:52px; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:500; }
+  .lane-cell.pub  { background:#28312a; border:1px solid #2ea043; color:#3fb950; }
+  .lane-cell.sub  { background:#212830; border:1px solid #388bfd; color:#58a6ff; }
+  .lane-cell.both { background:#231d35; border:1px solid #8957e5; color:#bc8cff; }
+  .lane-cell.empty{ background:#161b22; border:1px dashed #21262d; }
+  .hop-arrow-cell { text-align:center; color:#484f58; font-size:20px; vertical-align:middle; padding:0 4px; }
+
+  .journey-meta { margin-bottom:14px; }
+  .journey-meta .title { font-size:13px; font-weight:600; color:#f0f6fc; }
+  .journey-meta .sub   { font-size:12px; color:#8b949e; margin-left:10px; }
+  .gap-list  { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+  .gap-badge { background:rgba(248,81,73,.1); border:1px solid rgba(248,81,73,.3); color:#f85149; border-radius:4px; padding:3px 8px; font-size:11px; }
+  .hint-badge{ background:rgba(210,153,34,.1); border:1px solid rgba(210,153,34,.3); color:#d29922; border-radius:4px; padding:3px 8px; font-size:11px; }
+  .actor-badge { font-size:10px; color:#8b949e; margin-left:5px; }
+  .boundary-badge { font-size:10px; background:#21262d; border:1px solid #30363d; border-radius:3px; padding:1px 5px; margin-left:4px; color:#e6edf3; }
+
+  .event-view-toggle { display:flex; border:1px solid #30363d; border-radius:6px; overflow:hidden; }
+  .event-view-btn { padding:5px 12px; font-size:12px; background:#21262d; color:#8b949e; cursor:pointer; border:none; border-right:1px solid #30363d; }
+  .event-view-btn:last-child { border-right:none; }
+  .event-view-btn.active { background:#30363d; color:#f0f6fc; }
+  .event-hop-card { flex-shrink:0; width:240px; background:#1c2128; border:1px solid #30363d; border-radius:8px; padding:12px; margin:0 4px; }
+  .event-hop-card .hop-topic { font-family:monospace; font-size:12px; color:#58a6ff; word-break:break-all; margin:4px 0 10px; }
+  .event-hop-gaps { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:8px; }
+  .event-flow-narrative { margin-bottom:10px; font-size:11px; color:#c9d1d9; }
+  .event-flow-narrative summary { cursor:pointer; color:#8b949e; font-weight:500; margin-bottom:4px; }
+  .event-flow-narrative pre { margin:6px 0 0; padding:8px 10px; background:#161b22; border:1px solid #30363d; border-radius:6px; white-space:pre-wrap; line-height:1.45; font-family:ui-monospace,monospace; font-size:11px; }
+  .event-flow-trace-meta { font-size:11px; color:#8b949e; margin:4px 0 8px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .event-flow-trace-meta .pill { background:#21262d; border:1px solid #30363d; border-radius:999px; padding:2px 8px; }
+  .event-flow-hop-summaries { margin-bottom:10px; font-size:11px; color:#c9d1d9; }
+  .event-flow-hop-summaries summary { cursor:pointer; color:#8b949e; font-weight:500; margin-bottom:4px; }
+  .event-flow-hop-summaries .summary-line { padding:4px 0; border-bottom:1px solid #21262d; font-family:ui-monospace,monospace; font-size:10px; line-height:1.4; }
+  .event-participant { display:flex; gap:8px; align-items:flex-start; border-radius:6px; padding:8px; margin:6px 0; font-size:11px; }
+  .event-participant.pub { background:#28312a; border:1px solid #2ea043; }
+  .event-participant.sub { background:#212830; border:1px solid #388bfd; }
+  .event-participant-role { font-size:14px; font-weight:600; flex-shrink:0; line-height:1.2; }
+  .event-participant.pub .event-participant-role { color:#3fb950; }
+  .event-participant.sub .event-participant-role { color:#58a6ff; }
+  .event-participant-svc { font-weight:600; color:#f0f6fc; margin-bottom:2px; }
+  .event-participant-res { font-family:monospace; font-size:10px; color:#8b949e; word-break:break-all; }
+  .event-participant-handler { font-family:monospace; font-size:10px; color:#6e7681; margin-top:3px; word-break:break-all; }
+  .event-participant-badges { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+  .event-participant-badges .hint-badge { font-size:9px; padding:2px 6px; }
+  .continuation-card { flex-shrink:0; width:200px; background:#161b22; border:1px dashed #484f58; border-radius:8px; padding:10px; margin:0 4px; font-size:11px; color:#8b949e; }
+  .continuation-card .step-num { margin-bottom:6px; }
+  .event-entry-anchor { flex-shrink:0; width:210px; }
+
+  .event-flow-graph-wrap { background:#161b22; border:1px solid #30363d; border-radius:8px; position:relative; margin-top:8px; }
+  #event-flow-graph-svg { width:100%; height:min(520px, 70vh); display:block; }
+  .event-flow-graph-controls { position:absolute; top:10px; right:10px; display:flex; gap:6px; }
+  .event-flow-graph-controls .btn { font-size:16px; padding:4px 10px; }
+  #event-flow-graph-svg .ef-node { cursor:pointer; }
+  #event-flow-graph-svg .ef-node.dimmed { opacity:0.28; }
+  #event-flow-graph-svg .ef-link { fill:none; stroke-width:1.5px; }
+  #event-flow-graph-svg .ef-link.publish { stroke:#2ea043; }
+  #event-flow-graph-svg .ef-link.subscribe { stroke:#388bfd; }
+  #event-flow-graph-svg .ef-link.handoff { stroke:#d29922; stroke-dasharray:6 4; }
+  #event-flow-graph-svg .ef-link.entry { stroke:#484f58; stroke-dasharray:2 3; }
+  #event-flow-graph-svg .ef-link.terminal { stroke:#6e7681; stroke-dasharray:4 4; }
+  #event-flow-graph-svg .ef-link.dimmed { opacity:0.2; }
+  #event-flow-graph-svg .ef-topic-label { font-size:9px; fill:#58a6ff; font-family:monospace; }
+  #event-flow-graph-svg .ef-node-label { font-size:10px; fill:#e6edf3; pointer-events:none; }
+  .event-dimmed { opacity:0.22 !important; pointer-events:none; }
+  .event-hop-card.event-dimmed-hop { opacity:0.25; }
+  .matrix-cell { padding:3px; vertical-align:top; }
+  .matrix-chip { border-radius:4px; padding:3px 6px; margin:2px 0; font-size:10px; font-weight:500; line-height:1.3; }
+  .matrix-chip.pub { background:#28312a; border:1px solid #2ea043; color:#3fb950; }
+  .matrix-chip.sub { background:#212830; border:1px solid #388bfd; color:#58a6ff; }
+  .matrix-chip .matrix-chip-res { font-family:monospace; font-size:9px; color:#8b949e; display:block; word-break:break-all; }
+  .live-dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-left:4px; vertical-align:middle; }
+  .live-dot.ok { background:#3fb950; }
+  .live-dot.bad { background:#f85149; }
+  .live-dot.skip { background:#484f58; }
+  .event-flow-legend { font-size:11px; color:#8b949e; margin:8px 0 4px; display:flex; flex-wrap:wrap; gap:12px; }
+  .event-flow-legend span { white-space:nowrap; }
+  .journey-check { display:flex; align-items:center; gap:6px; font-size:13px; color:#e6edf3; margin-bottom:4px; }
+  .journey-check input { accent-color:#238636; }
+  .transport-badge { display:inline-block; font-size:9px; font-weight:700; letter-spacing:0.04em; border-radius:4px; padding:1px 5px; margin-right:6px; vertical-align:middle; }
+  .transport-badge.transport-pubsub { background:rgba(56,139,253,.15); border:1px solid rgba(56,139,253,.35); color:#58a6ff; }
+  .transport-badge.transport-kafka { background:rgba(210,153,34,.12); border:1px solid rgba(210,153,34,.35); color:#d29922; }
+  .schema-row { font-family:monospace; font-size:11px; margin:4px 0; color:#8b949e; }
+  .proto-fields { margin:4px 0 10px 8px; border-left:2px solid #30363d; padding-left:8px; }
+  .proto-fields table { width:100%; border-collapse:collapse; font-family:monospace; font-size:10px; }
+  .proto-fields th { text-align:left; color:#6e7681; font-weight:600; padding:2px 6px 2px 0; border-bottom:1px solid #21262d; }
+  .proto-fields td { padding:2px 6px 2px 0; color:#8b949e; vertical-align:top; }
+  .proto-fields td.field-name { color:#79c0ff; }
+  .proto-fields td.field-type { color:#a5d6ff; }
+  .proto-fields td.field-num { color:#6e7681; text-align:right; }
+  .proto-fields .proto-fields-more { font-size:10px; color:#6e7681; margin-top:2px; }
+  .gate-type-row { font-size:11px; margin:4px 0; color:#e3b341; font-family:monospace; }
+</style>
+</head>
+<body>
+
+<header>
+  <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+    <rect width="26" height="26" rx="6" fill="#238636"/>
+    <circle cx="13" cy="13" r="6" stroke="#fff" stroke-width="2"/>
+    <circle cx="13" cy="13" r="2.5" fill="#fff"/>
+  </svg>
+  <h1>Test<span>Seer</span> Index</h1>
+  <div class="header-meta">
+    <span class="backend-url">http://localhost:8080</span>
+    <button class="btn btn-primary" onclick="loadAll()">↺ Refresh</button>
+  </div>
+</header>
+
+<nav>
+  <div class="tab active"  onclick="showTab('status')">Status</div>
+  <div class="tab"         onclick="showTab('graph')">Dependency Graph</div>
+  <div class="tab"         onclick="showTab('impact')">Impact Analysis</div>
+  <div class="tab"         onclick="showTab('journey')">Customer Journey</div>
+</nav>
+
+<!-- STATUS -->
+<div id="view-status" class="view active">
+  <div id="status-error"></div>
+  <div id="stats-bar" class="stats-bar"></div>
+  <div class="search-bar"><input id="svc-search" type="text" placeholder="Filter services…" oninput="filterServices()"/></div>
+  <div id="service-grid" class="service-grid"><div class="loading">Connecting to backend…</div></div>
+  <div id="svc-detail" class="detail-panel" style="display:none"></div>
+</div>
+
+<!-- GRAPH -->
+<div id="view-graph" class="view">
+  <div id="graph-error"></div>
+  <div class="graph-toolbar">
+    <div class="mode-toggle">
+      <button class="mode-btn active" data-graph-mode="services" onclick="setGraphMode('services')">Class / Service</button>
+      <button class="mode-btn" data-graph-mode="maven-services" onclick="setGraphMode('maven-services')">Maven (cross-service)</button>
+      <button class="mode-btn" data-graph-mode="maven-tree" onclick="setGraphMode('maven-tree')">Maven artifact tree</button>
+    </div>
+    <div id="graph-maven-controls">
+      <div><label>Service (repo)</label>
+        <select id="graph-maven-svc" onchange="onGraphMavenServiceChange()"></select>
+      </div>
+      <div><label>Module (microservice)</label>
+        <select id="graph-maven-module" onchange="onGraphMavenModuleChange()" style="min-width:260px">
+          <option value="">Select module…</option>
+        </select>
+      </div>
+      <div><label>Depth</label>
+        <select id="graph-maven-depth">
+          <option value="1">1 hop</option>
+          <option value="2">2 hops</option>
+          <option value="3" selected>3 hops</option>
+          <option value="5">5 hops</option>
+          <option value="10">10 hops</option>
+          <option value="0">All (unbounded)</option>
+        </select>
+      </div>
+      <div><label>Scope</label>
+        <select id="graph-maven-scope">
+          <option value="runtime" selected>runtime</option>
+          <option value="compile">compile</option>
+          <option value="test">test</option>
+          <option value="all">all</option>
+        </select>
+      </div>
+      <div><label>Artifacts</label>
+        <select id="graph-maven-external">
+          <option value="quotient">Quotient only</option>
+          <option value="all" selected>All (incl. third-party)</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="graphBuilt=false; buildGraph()">Load tree</button>
+    </div>
+  </div>
+  <div id="maven-tree-split">
+    <div id="maven-tree-text-panel">
+      <h4>CLI-style tree</h4>
+      <div id="maven-tree-meta"></div>
+      <pre id="maven-tree-text"></pre>
+    </div>
+    <div id="graph-container">
+    <svg id="graph-svg">
+      <defs>
+        <marker id="arrow" viewBox="0 -4 10 8" refX="20" refY="0" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,-4L10,0L0,4" fill="#484f58"/>
+        </marker>
+        <marker id="arrow-hl" viewBox="0 -4 10 8" refX="20" refY="0" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,-4L10,0L0,4" fill="#58a6ff"/>
+        </marker>
+      </defs>
+    </svg>
+    <div class="graph-controls">
+      <button class="btn" onclick="graphZoom(1.3)">＋</button>
+      <button class="btn" onclick="graphZoom(0.77)">－</button>
+      <button class="btn" onclick="resetZoom()">⌂</button>
+    </div>
+    <div class="graph-legend" id="graph-legend">
+      <div><div class="legend-dot" style="background:#3fb950"></div>CURRENT</div>
+      <div><div class="legend-dot" style="background:#d29922"></div>STALE</div>
+      <div><div class="legend-dot" style="background:#8b949e"></div>NOT_INDEXED</div>
+      <div><div class="legend-dot" style="background:#58a6ff"></div>Selected</div>
+    </div>
+    <div class="graph-tooltip" id="graph-tooltip"></div>
+    </div>
+  </div>
+  <div id="graph-detail"></div>
+</div>
+
+<!-- IMPACT -->
+<div id="view-impact" class="view">
+  <div class="impact-form">
+    <div><label>Service</label><select id="impact-svc" onchange="onImpactServiceChange()"></select></div>
+    <div><label>Commit SHA</label><input id="impact-sha" type="text" placeholder="e.g. abc1234"/></div>
+    <button class="btn btn-primary" onclick="runImpact()">Analyze</button>
+  </div>
+  <div id="impact-error"></div>
+  <div id="impact-result"></div>
+</div>
+
+<!-- JOURNEY -->
+<div id="view-journey" class="view">
+  <div class="journey-form">
+    <div class="mode-toggle">
+      <button class="mode-btn active" data-mode="entry" onclick="setJourneyMode('entry')">Entry Flow</button>
+      <button class="mode-btn"        data-mode="event" onclick="setJourneyMode('event')">Event Flow</button>
+      <button class="mode-btn"        data-mode="flow"  onclick="setJourneyMode('flow')">Service Flow</button>
+    </div>
+
+    <!-- Entry Flow fields -->
+    <div id="journey-entry-fields" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div><label>Service</label><select id="journey-svc"></select></div>
+      <div><label>Path or Trigger ID <span style="color:#484f58">(optional filter)</span></label>
+           <input id="journey-path" type="text" placeholder="e.g. /checkout or trigger-id" style="min-width:260px"/></div>
+      <div><label>Env</label>
+        <select id="journey-env" style="min-width:100px">
+          <option value="pdn" selected>pdn</option>
+          <option value="qa">qa</option>
+          <option value="dev">dev</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Service Flow Diagram fields (BL-054) -->
+    <div id="journey-flow-fields" style="display:none;flex-wrap:wrap;gap:10px;align-items:flex-end">
+      <div><label>Service</label><select id="journey-flow-svc"></select></div>
+      <div><label>Anchor</label>
+        <input id="journey-flow-anchor" type="text" placeholder="handlerFqn:com...Consumer.method" style="min-width:360px"/></div>
+      <div><label>Package prefix</label>
+        <input id="journey-flow-prefix" type="text" placeholder="com.quotient.platform.transaction.eval" style="min-width:280px"/></div>
+    </div>
+
+    <!-- Event Flow fields -->
+    <div id="journey-event-fields" style="display:none;flex-wrap:wrap;gap:10px;align-items:flex-end">
+      <div><label>Org ID</label><input id="journey-org" type="text" placeholder="e.g. quotient" style="min-width:140px" onchange="loadJourneyTopics()"/></div>
+      <div><label>Topic Short ID</label><select id="journey-topic" style="min-width:260px" onchange="onJourneyTopicChange()"><option value="">Loading topics…</option></select></div>
+      <div><label>Env</label>
+        <select id="journey-env2" style="min-width:100px" onchange="loadJourneyTopics()">
+          <option value="pdn" selected>pdn</option>
+          <option value="qa">qa</option>
+          <option value="dev">dev</option>
+        </select>
+      </div>
+      <div><label>BFS mode</label>
+        <select id="journey-follow-mode" style="min-width:110px" title="runtime skips manifest fan-out; inventory preserves full catalog walk">
+          <option value="runtime" selected>runtime</option>
+          <option value="inventory">inventory</option>
+        </select>
+      </div>
+      <div><label>View</label>
+        <div class="event-view-toggle">
+          <button type="button" class="event-view-btn active" data-event-view="pipeline" onclick="setEventFlowView('pipeline')">Pipeline</button>
+          <button type="button" class="event-view-btn" data-event-view="graph" onclick="setEventFlowView('graph')">Graph</button>
+          <button type="button" class="event-view-btn" data-event-view="matrix" onclick="setEventFlowView('matrix')">Matrix</button>
+        </div>
+      </div>
+      <div><label>Focus service</label>
+        <select id="journey-focus-svc" style="min-width:180px" onchange="onEventFlowFocusChange()">
+          <option value="">All services</option>
+        </select>
+      </div>
+      <div><label class="journey-check"><input type="checkbox" id="journey-live-verify" onchange="onEventFlowLiveVerifyChange()"/> Verify GCP</label></div>
+      <div><label class="journey-check"><input type="checkbox" id="journey-highlight-path" checked onchange="onEventFlowHighlightChange()"/> Highlight trace path</label></div>
+    </div>
+
+    <button class="btn btn-primary" onclick="runJourney()">Trace ▶</button>
+  </div>
+  <div id="journey-error"></div>
+  <div id="journey-canvas"></div>
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let allServices = [];   // ServiceEntry[]
+let statusMap   = {};   // serviceId → OrgServiceStatus
+let triggerMap  = {};   // serviceId → EntryTriggerView[] (loaded after status)
+let statusFilter = null; // null | 'CURRENT' | 'STALE' | 'INDEXING' | 'NOT_INDEXED'
+let graphBuilt  = false;
+let graphMode   = 'services'; // services | maven-services | maven-tree
+let graphFocusServiceId = null;
+let graphMavenModulePath = null;
+let graphMavenModulesCache = {};
+let svgSel, gSel, zoomBehavior, simulation;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+// Served from the backend — use same origin (no CORS)
+const base = () => '';
+
+async function api(path) {
+  const r = await fetch(base() + path);
+  if (!r.ok) throw new Error(`${r.status} — ${path}`);
+  return r.json();
+}
+
+function nodeColor(freshness) {
+  return { CURRENT:'#3fb950', STALE:'#d29922', INDEXING:'#58a6ff' }[freshness] || '#484f58';
+}
+
+function nodeColorByType(node) {
+  if (node.nodeType === 'MAVEN_MODULE') return '#3fb950';
+  if (node.nodeType === 'ARTIFACT') return '#d29922';
+  return nodeColor(node.freshness);
+}
+
+function nodeLabel(node) {
+  if (node.label) return node.label.length > 28 ? node.label.slice(0, 26) + '…' : node.label;
+  const name = node.name || node.id || '?';
+  return name.length > 22 ? name.slice(0, 20) + '…' : name;
+}
+
+function mavenNodeDisplayLabel(node) {
+  if (!node) return '?';
+  if (node.displayLabel) return node.displayLabel;
+  const id = node.id || '';
+  if (id.startsWith('gav::')) return id.slice(5);
+  if (node.symbolFqn && !node.symbolFqn.includes('::maven::')) return node.symbolFqn;
+  const mod = id.split('::maven::')[1];
+  if (mod !== undefined) return mod || '(aggregator pom)';
+  return node.label || node.name || id;
+}
+
+function setGraphMode(mode) {
+  graphMode = mode;
+  document.querySelectorAll('[data-graph-mode]').forEach(b =>
+    b.classList.toggle('active', b.dataset.graphMode === mode));
+  const mavenCtrl = document.getElementById('graph-maven-controls');
+  if (mavenCtrl) mavenCtrl.style.display = mode === 'maven-tree' ? 'flex' : 'none';
+  const viewGraph = document.getElementById('view-graph');
+  if (viewGraph) viewGraph.classList.toggle('maven-tree-mode', mode === 'maven-tree');
+  updateGraphLegend();
+  graphBuilt = false;
+  if (document.getElementById('view-graph').classList.contains('active')) buildGraph();
+}
+
+function updateGraphLegend() {
+  const el = document.getElementById('graph-legend');
+  if (!el) return;
+  if (graphMode === 'maven-services') {
+    el.innerHTML = `
+      <div><div class="legend-dot" style="background:#3fb950"></div>Service (CURRENT)</div>
+      <div><div class="legend-dot" style="background:#f0883e"></div>Maven pin (linked lib)</div>
+      <div style="font-size:11px;color:#6e7681;margin-top:4px">Dashed orange = DEPENDS_ON_ARTIFACT → owning service</div>`;
+  } else if (graphMode === 'maven-tree') {
+    el.innerHTML = `
+      <div><div class="legend-dot" style="background:#3fb950"></div>MAVEN_MODULE (deployable)</div>
+      <div><div class="legend-dot" style="background:#d29922"></div>ARTIFACT (GAV)</div>
+      <div style="font-size:11px;color:#6e7681;margin-top:4px">Left: mvn-style tree · Right: hierarchical layout · depth=0 = all indexed hops</div>`;
+  } else {
+    el.innerHTML = `
+      <div><div class="legend-dot" style="background:#3fb950"></div>CURRENT</div>
+      <div><div class="legend-dot" style="background:#d29922"></div>STALE</div>
+      <div><div class="legend-dot" style="background:#8b949e"></div>NOT_INDEXED</div>
+      <div><div class="legend-dot" style="background:#58a6ff"></div>Selected</div>`;
+  }
+}
+
+async function loadGraphMavenModules(serviceId, force) {
+  if (!serviceId) return [];
+  if (!force && graphMavenModulesCache[serviceId]) return graphMavenModulesCache[serviceId];
+  try {
+    const env = await api(`/v1/facts/maven-dependencies?serviceId=${encodeURIComponent(serviceId)}&scope=runtime`);
+    const modules = ((env.data && env.data.modules) || [])
+      .filter(m => m.modulePath && String(m.modulePath).trim());
+    graphMavenModulesCache[serviceId] = modules;
+    return modules;
+  } catch (_) {
+    graphMavenModulesCache[serviceId] = [];
+    return [];
+  }
+}
+
+function populateGraphMavenModuleSelect(modules) {
+  const modSel = document.getElementById('graph-maven-module');
+  if (!modSel) return;
+  if (!modules.length) {
+    modSel.innerHTML = '<option value="">No modules indexed</option>';
+    return;
+  }
+  modSel.innerHTML = modules.map(m => {
+    const pkg = m.packaging ? `:${m.packaging}` : '';
+    const ver = m.version ? `:${m.version}` : '';
+    const label = `${m.modulePath} (${m.groupId || '?'}:${m.artifactId || '?'}${pkg}${ver})`;
+    return `<option value="${esc(m.modulePath)}">${esc(label)}</option>`;
+  }).join('');
+  if (graphMavenModulePath && modules.some(m => m.modulePath === graphMavenModulePath)) {
+    modSel.value = graphMavenModulePath;
+  } else {
+    const preferred = modules.find(m => m.packaging === 'jar') || modules[0];
+    modSel.value = preferred ? preferred.modulePath : '';
+    graphMavenModulePath = modSel.value || null;
+  }
+}
+
+async function populateGraphMavenSelect() {
+  const sel = document.getElementById('graph-maven-svc');
+  if (!sel) return;
+  const maven = allServices.filter(s => (s.buildTool || '').toUpperCase() === 'MAVEN');
+  sel.innerHTML = maven.length
+    ? maven.map(s => `<option value="${s.serviceId}">${s.serviceName}</option>`).join('')
+    : '<option value="">No Maven services</option>';
+  if (graphFocusServiceId && maven.some(s => s.serviceId === graphFocusServiceId)) {
+    sel.value = graphFocusServiceId;
+  }
+  const serviceId = sel.value;
+  if (serviceId) {
+    const modules = await loadGraphMavenModules(serviceId);
+    populateGraphMavenModuleSelect(modules);
+  }
+}
+
+function onGraphMavenServiceChange() {
+  const sel = document.getElementById('graph-maven-svc');
+  if (sel && sel.value) {
+    graphFocusServiceId = sel.value;
+    graphMavenModulePath = null;
+    delete graphMavenModulesCache[sel.value];
+  }
+  graphBuilt = false;
+  populateGraphMavenSelect().then(() => buildGraph());
+}
+
+function onGraphMavenModuleChange() {
+  const modSel = document.getElementById('graph-maven-module');
+  graphMavenModulePath = modSel && modSel.value ? modSel.value : null;
+  graphBuilt = false;
+  buildGraph();
+}
+
+function showMavenArtifactTree(serviceId, modulePath) {
+  graphFocusServiceId = serviceId;
+  if (modulePath) graphMavenModulePath = modulePath;
+  graphMode = 'maven-tree';
+  document.querySelectorAll('[data-graph-mode]').forEach(b =>
+    b.classList.toggle('active', b.dataset.graphMode === 'maven-tree'));
+  const mavenCtrl = document.getElementById('graph-maven-controls');
+  if (mavenCtrl) mavenCtrl.style.display = 'flex';
+  const viewGraph = document.getElementById('view-graph');
+  if (viewGraph) viewGraph.classList.add('maven-tree-mode');
+  updateGraphLegend();
+  graphBuilt = true;
+  showTab('graph');
+  const sel = document.getElementById('graph-maven-svc');
+  if (sel && serviceId) sel.value = serviceId;
+  populateGraphMavenSelect().then(() => {
+    if (modulePath) {
+      const modSel = document.getElementById('graph-maven-module');
+      if (modSel) modSel.value = modulePath;
+      graphMavenModulePath = modulePath;
+    }
+    graphBuilt = false;
+    buildGraph();
+  });
+  showGraphDetail(serviceId, { mavenTreeRoot: serviceId, mavenModulePath: modulePath });
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) =>
+    t.classList.toggle('active', ['status','graph','impact','journey'][i] === name));
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  if (name === 'graph') {
+    updateGraphLegend();
+    if (!graphBuilt) buildGraph();
+  }
+}
+
+// ── Load all ──────────────────────────────────────────────────────────────────
+async function loadAll() {
+  graphBuilt = false;
+  triggerMap = {};
+  await loadStatus();
+  if (document.getElementById('view-graph').classList.contains('active')) buildGraph();
+}
+
+// ── Status tab ────────────────────────────────────────────────────────────────
+async function loadStatus() {
+  document.getElementById('status-error').innerHTML = '';
+  document.getElementById('service-grid').innerHTML = '<div class="loading">Loading…</div>';
+  try {
+    // GET /registry/services → ServiceEntry[]
+    allServices = await api('/registry/services');
+
+    // GET /v1/status → OrgStatusSummary { orgId, serviceCount, services: OrgServiceStatus[] }
+    // OrgServiceStatus { serviceId, orgId, repo, serviceName, freshnessStatus,
+    //                    lastCommitSha, lastJobId, lastJobStatus }
+    statusMap = {};
+    try {
+      const org = await api('/v1/status');
+      (org.services || []).forEach(s => { statusMap[s.serviceId] = s; });
+    } catch(_) {}
+
+    populateImpactSelect();
+    populateJourneySelect();
+    populateGraphMavenSelect();
+    renderStats();
+    renderGrid();
+    loadAllTriggers();
+  } catch(e) {
+    document.getElementById('status-error').innerHTML =
+      `<div class="error-msg">Cannot reach backend: ${e.message}<br>
+       This page must be opened via <strong>http://localhost:8080/viz.html</strong> (not from the filesystem).<br>
+       Start: <code>cd testseer/testseer-backend &amp;&amp; docker compose up -d &amp;&amp; ./mvn21 spring-boot:run</code></div>`;
+    document.getElementById('service-grid').innerHTML = '';
+    document.getElementById('stats-bar').innerHTML = '';
+  }
+}
+
+function freshness(svcId) {
+  return (statusMap[svcId] || {}).freshnessStatus || 'NOT_INDEXED';
+}
+
+function renderStats() {
+  const c = { CURRENT:0, STALE:0, INDEXING:0, NOT_INDEXED:0 };
+  allServices.forEach(s => { const f = freshness(s.serviceId); c[f] = (c[f]||0)+1; });
+  const card = (cls, label, value, filter) => {
+    const active = statusFilter === filter ? ' active' : '';
+    const onclick = filter == null
+      ? 'onclick="setStatusFilter(null)"'
+      : `onclick="setStatusFilter('${filter}')"`;
+    return `<div class="stat-card ${cls}${active}" ${onclick}><div class="label">${label}</div><div class="value">${value}</div></div>`;
+  };
+  document.getElementById('stats-bar').innerHTML = [
+    card('total', 'Total', allServices.length, null),
+    card('current', 'Current', c.CURRENT, 'CURRENT'),
+    card('stale', 'Stale', c.STALE, 'STALE'),
+    card('indexing', 'Indexing', c.INDEXING, 'INDEXING'),
+    card('not-indexed', 'Not Indexed', c.NOT_INDEXED, 'NOT_INDEXED'),
+  ].join('');
+}
+
+function setStatusFilter(filter) {
+  statusFilter = statusFilter === filter ? null : filter;
+  renderStats();
+  renderGrid(document.getElementById('svc-search').value);
+}
+
+function triggerPathLine(t) {
+  if (t.httpMethod) return `${t.httpMethod} ${t.pathPattern || '?'}`;
+  return t.pathPattern || t.triggerId || '—';
+}
+
+function dedupeTriggers(triggers) {
+  const seen = new Set();
+  return (triggers || []).filter(t => {
+    const key = `${t.triggerKind || ''}|${t.httpMethod || ''}|${t.pathPattern || ''}|${t.triggerId || ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function renderTriggersBlock(triggers, maxShow = 4, detail = false) {
+  const list = dedupeTriggers(triggers);
+  if (!list.length) return `<div class="svc-triggers${detail ? ' svc-triggers-detail' : ''} empty">No entry triggers</div>`;
+  const shown = list.slice(0, maxShow);
+  const more = list.length - shown.length;
+  const rows = shown.map(t => `
+    <div class="trigger-row" title="${esc(t.linkedHandlerFqn || '')}">
+      <span class="trigger-kind">${esc(t.triggerKind || 'TRIGGER')}</span>
+      <span class="trigger-path">${esc(triggerPathLine(t))}</span>
+    </div>`).join('');
+  return `<div class="svc-triggers${detail ? ' svc-triggers-detail' : ''}">${rows}${more > 0 ? `<div class="trigger-more">+${more} more</div>` : ''}</div>`;
+}
+
+function triggersForCard(serviceId) {
+  const f = freshness(serviceId);
+  if (f === 'NOT_INDEXED') return '<div class="svc-triggers empty">Not indexed</div>';
+  if (!(serviceId in triggerMap)) return '<div class="svc-triggers loading">Loading triggers…</div>';
+  return renderTriggersBlock(triggerMap[serviceId], 4);
+}
+
+async function loadAllTriggers() {
+  const indexed = allServices.filter(s => {
+    const f = freshness(s.serviceId);
+    return f === 'CURRENT' || f === 'STALE' || f === 'INDEXING';
+  });
+  await Promise.allSettled(indexed.map(async svc => {
+    try {
+      const env = await api(`/v1/facts/entry-triggers?serviceId=${encodeURIComponent(svc.serviceId)}`);
+      triggerMap[svc.serviceId] = env.data || [];
+    } catch(_) {
+      triggerMap[svc.serviceId] = [];
+    }
+  }));
+  renderGrid(document.getElementById('svc-search').value);
+}
+
+function renderGrid(filter = '') {
+  const q = filter.toLowerCase();
+  const list = allServices.filter(s => {
+    if (statusFilter && freshness(s.serviceId) !== statusFilter) return false;
+    if (!q) return true;
+    const triggers = triggerMap[s.serviceId] || [];
+    const triggerText = triggers.map(t => `${t.triggerKind || ''} ${triggerPathLine(t)}`).join(' ').toLowerCase();
+    return s.serviceName.toLowerCase().includes(q)
+      || s.repo.toLowerCase().includes(q)
+      || triggerText.includes(q);
+  });
+  document.getElementById('service-grid').innerHTML = list.map(svc => {
+    const f   = freshness(svc.serviceId);
+    const sha = (statusMap[svc.serviceId] || {}).lastCommitSha;
+    return `<div class="service-card" onclick="showDetail('${svc.serviceId}')">
+      <div class="svc-name" title="${svc.serviceName}">${svc.serviceName}</div>
+      <div class="svc-meta">${svc.orgId} / ${svc.repo} · ${svc.buildTool||'?'}</div>
+      <span class="svc-status status-${f}">${f}</span>
+      ${sha ? `<span class="svc-meta" style="margin-left:8px">${sha.slice(0,7)}</span>` : ''}
+      ${triggersForCard(svc.serviceId)}
+    </div>`;
+  }).join('');
+}
+
+function filterServices() {
+  renderGrid(document.getElementById('svc-search').value);
+}
+
+async function showDetail(serviceId) {
+  const svc = allServices.find(s => s.serviceId === serviceId);
+  if (!svc) return;
+  const panel = document.getElementById('svc-detail');
+  panel.style.display = 'block';
+
+  // GET /v1/status/{serviceId} → ResponseEnvelope<Map>
+  // Envelope: { schemaVersion, indexedAt, commitSha, freshnessStatus, data: { serviceId, indexedAt, commitSha } }
+  let statusRows = '';
+  try {
+    const env = await api(`/v1/status/${serviceId}`);
+    // freshnessStatus is on the envelope itself
+    const f   = env.freshnessStatus || 'NOT_INDEXED';
+    const sha = env.commitSha || (env.data && env.data.commitSha) || '—';
+    const at  = env.indexedAt || (env.data && env.data.indexedAt) || '—';
+    // lastJobId / lastJobStatus come from org status
+    const orgSt = statusMap[serviceId] || {};
+    statusRows = `
+      <div class="detail-row"><span class="key">Freshness</span><span class="val"><span class="svc-status status-${f}">${f}</span></span></div>
+      <div class="detail-row"><span class="key">Last Commit</span><span class="val">${sha}</span></div>
+      <div class="detail-row"><span class="key">Indexed At</span><span class="val">${at}</span></div>
+      <div class="detail-row"><span class="key">Last Job</span><span class="val">${orgSt.lastJobId||'—'} (${orgSt.lastJobStatus||'—'})</span></div>`;
+  } catch(_) {}
+
+  let triggersSection = '<div class="impact-section triggers-section"><h4>Entry Triggers</h4><div class="svc-triggers loading">Loading…</div></div>';
+  let mavenSection = (svc.buildTool === 'MAVEN')
+    ? '<div class="impact-section maven-section"><h4>Maven Dependencies</h4><div class="svc-maven loading">Loading…</div></div>'
+    : '';
+
+  panel.innerHTML = `
+    <h3>${svc.serviceName}</h3>
+    <div class="detail-row"><span class="key">Service ID</span><span class="val">${svc.serviceId}</span></div>
+    <div class="detail-row"><span class="key">Org / Repo</span><span class="val">${svc.orgId} / ${svc.repo}</span></div>
+    <div class="detail-row"><span class="key">Build Tool</span><span class="val">${svc.buildTool||'—'}</span></div>
+    <div class="detail-row"><span class="key">Module Type</span><span class="val">${svc.moduleType||'—'}</span></div>
+    <div class="detail-row"><span class="key">Source Roots</span><span class="val">${(svc.sourceRoots||[]).join(', ')||'—'}</span></div>
+    ${statusRows}
+    ${triggersSection}
+    ${mavenSection}
+    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" onclick="highlightInGraph('${serviceId}')">Show in Dependency Graph</button>
+      ${(svc.buildTool || '').toUpperCase() === 'MAVEN'
+        ? `<button class="btn" onclick="showMavenArtifactTree('${serviceId}')">Maven artifact tree</button>`
+        : ''}
+    </div>`;
+
+  if (freshness(serviceId) === 'NOT_INDEXED') {
+    panel.querySelector('.triggers-section').innerHTML =
+      '<h4>Entry Triggers</h4><div class="svc-triggers svc-triggers-detail empty">Not indexed</div>';
+    const mavenEl = panel.querySelector('.maven-section');
+    if (mavenEl) mavenEl.innerHTML = '<h4>Maven Dependencies</h4><div class="svc-maven empty">Not indexed</div>';
+    return;
+  }
+
+  try {
+    if (!(serviceId in triggerMap)) {
+      const env = await api(`/v1/facts/entry-triggers?serviceId=${encodeURIComponent(serviceId)}`);
+      triggerMap[serviceId] = env.data || [];
+    }
+    panel.querySelector('.triggers-section').innerHTML =
+      `<h4>Entry Triggers (${dedupeTriggers(triggerMap[serviceId]).length})</h4>${renderTriggersBlock(triggerMap[serviceId], 50, true)}`;
+  } catch(_) {
+    panel.querySelector('.triggers-section').innerHTML =
+      '<h4>Entry Triggers</h4><div class="svc-triggers svc-triggers-detail empty">Could not load triggers</div>';
+  }
+
+  const mavenEl = panel.querySelector('.maven-section');
+  if (mavenEl) {
+    try {
+      const env = await api(`/v1/facts/maven-dependencies?serviceId=${encodeURIComponent(serviceId)}&scope=runtime&directOnly=true`);
+      const deps = (env.data && env.data.dependencies) || [];
+      if (!deps.length) {
+        mavenEl.innerHTML = '<h4>Maven Dependencies</h4><div class="svc-maven empty">No indexed Maven facts</div>';
+      } else {
+        const rows = deps.slice(0, 40).map(d => {
+          const coord = `${d.groupId}:${d.artifactId}:${d.version || d.versionLiteral || '?'}`;
+          const link = d.linkedServiceId
+            ? ` → <span class="pill linked" style="cursor:pointer" onclick="event.stopPropagation();highlightInGraph('${d.linkedServiceId}')">${d.linkedServiceId}</span>`
+            : '';
+          return `<div class="detail-row"><span class="key">${d.fromModulePath || '.'}</span><span class="val">${coord}${link}</span></div>`;
+        }).join('');
+        const more = deps.length > 40 ? `<div class="svc-meta">+${deps.length - 40} more</div>` : '';
+        mavenEl.innerHTML = `<h4>Maven Dependencies (${deps.length} direct)</h4>${rows}${more}
+          <div style="margin-top:8px">
+            <button class="btn" onclick="showMavenArtifactTree('${serviceId}')">Show in Dependency Graph</button>
+          </div>`;
+      }
+    } catch(_) {
+      mavenEl.innerHTML = '<h4>Maven Dependencies</h4><div class="svc-maven empty">Could not load Maven facts</div>';
+    }
+  }
+}
+
+// ── Graph tab ─────────────────────────────────────────────────────────────────
+async function buildGraph() {
+  if (graphMode === 'maven-tree') return buildMavenTreeGraph();
+  if (graphMode === 'maven-services') return buildMavenCrossServiceGraph();
+  return buildServiceGraph();
+}
+
+async function buildServiceGraph() {
+  document.getElementById('graph-error').innerHTML = '';
+  if (!allServices.length) {
+    try { await loadStatus(); } catch(_) {}
+  }
+  if (!allServices.length) {
+    document.getElementById('graph-error').innerHTML =
+      '<div class="error-msg">No services — check backend connection on the Status tab first.</div>';
+    return;
+  }
+
+  // Build a name→id map for resolving graph node .service → serviceId
+  const nameToId = {};
+  allServices.forEach(s => { nameToId[s.serviceName] = s.serviceId; });
+
+  // D3 nodes: one per service
+  const nodes = allServices.map(s => ({
+    id:        s.serviceId,
+    name:      s.serviceName,
+    freshness: freshness(s.serviceId),
+  }));
+
+  // Fetch reachability for each service (best-effort, capped at 50)
+  // GET /v1/graph/reachability?serviceId=X&type=service&orgId=Y
+  // → ResponseEnvelope<ReachabilityResult>
+  //   ReachabilityResult { nodeIds: String[], nodes: GraphNode[] }
+  //   GraphNode { id, orgId, repo, service, moduleType, nodeType, symbolFqn }
+  const links = [];
+  const seen  = new Set();
+  await Promise.allSettled(allServices.slice(0, 50).map(async svc => {
+    try {
+      const env = await api(
+        `/v1/graph/reachability?serviceId=${svc.serviceId}&type=service&orgId=${svc.orgId||'quotient'}`);
+      const result = env.data;
+      if (!result) return;
+      // nodeIds contains graph node IDs; for SERVICE nodes, GraphNodeIds.serviceNode(id)==id
+      // so nodeIds are directly usable as serviceIds (backend SQL already filters node_type='SERVICE')
+      (result.nodeIds || []).forEach(targetId => {
+        if (!targetId || targetId === svc.serviceId) return;
+        const key = `${svc.serviceId}→${targetId}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          links.push({ source: svc.serviceId, target: targetId });
+        }
+      });
+    } catch(_) {}
+  }));
+
+  renderGraph(nodes, links, { artifactView: false });
+  graphBuilt = true;
+}
+
+async function buildMavenCrossServiceGraph() {
+  document.getElementById('graph-error').innerHTML = '';
+  if (!allServices.length) {
+    try { await loadStatus(); } catch(_) {}
+  }
+  if (!allServices.length) {
+    document.getElementById('graph-error').innerHTML =
+      '<div class="error-msg">No services — check backend connection on the Status tab first.</div>';
+    return;
+  }
+
+  const nodes = allServices.map(s => ({
+    id: s.serviceId,
+    name: s.serviceName,
+    freshness: freshness(s.serviceId),
+  }));
+
+  const links = [];
+  const seen = new Set();
+  const mavenServices = allServices.filter(s => {
+    const f = freshness(s.serviceId);
+    return (s.buildTool || '').toUpperCase() === 'MAVEN'
+      && (f === 'CURRENT' || f === 'STALE' || f === 'INDEXING');
+  });
+
+  await Promise.allSettled(mavenServices.slice(0, 50).map(async svc => {
+    try {
+      const env = await api(
+        `/v1/facts/maven-dependencies?serviceId=${encodeURIComponent(svc.serviceId)}&scope=runtime&directOnly=true`);
+      const deps = (env.data && env.data.dependencies) || [];
+      deps.forEach(dep => {
+        const target = dep.linkedServiceId;
+        if (!target || target === svc.serviceId) return;
+        const key = `maven:${svc.serviceId}→${target}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        links.push({ source: svc.serviceId, target, kind: 'maven',
+          label: `${dep.groupId}:${dep.artifactId}` });
+      });
+    } catch(_) {}
+  }));
+
+  if (!links.length) {
+    document.getElementById('graph-error').innerHTML =
+      '<div class="error-msg">No cross-service Maven links found. Index Maven services with internal artifact pins (linked_service_id).</div>';
+  }
+
+  renderGraph(nodes, links, { artifactView: false });
+  graphBuilt = true;
+}
+
+async function buildMavenTreeGraph() {
+  document.getElementById('graph-error').innerHTML = '';
+  if (!allServices.length) {
+    try { await loadStatus(); } catch(_) {}
+  }
+  await populateGraphMavenSelect();
+
+  const sel = document.getElementById('graph-maven-svc');
+  const modSel = document.getElementById('graph-maven-module');
+  const serviceId = (sel && sel.value) || graphFocusServiceId;
+  const modulePath = (modSel && modSel.value) || graphMavenModulePath;
+  if (!serviceId) {
+    document.getElementById('graph-error').innerHTML =
+      '<div class="error-msg">Select a Maven service (repo) to load its artifact dependency tree.</div>';
+    return;
+  }
+  if (!modulePath) {
+    document.getElementById('graph-error').innerHTML =
+      '<div class="error-msg">Select a deployable module (microservice) — monorepos like optimus-offer-services-suite require picking e.g. optimus-galo-ns.</div>';
+    clearMavenTreeText();
+    renderGraph([], [], { artifactView: true });
+    graphBuilt = true;
+    return;
+  }
+
+  const depth = Number((document.getElementById('graph-maven-depth') || {}).value || 3);
+  const scope = (document.getElementById('graph-maven-scope') || {}).value || 'runtime';
+  const includeExternal = (document.getElementById('graph-maven-external') || {}).value !== 'quotient';
+  const svc = allServices.find(s => s.serviceId === serviceId);
+  const modules = graphMavenModulesCache[serviceId] || [];
+  const moduleMeta = modules.find(m => m.modulePath === modulePath);
+
+  try {
+    const q = `serviceId=${encodeURIComponent(serviceId)}&modulePath=${encodeURIComponent(modulePath)}&scope=${encodeURIComponent(scope)}&depth=${depth}&hydrate=true&includeExternal=${includeExternal}`;
+    const env = await api(`/v1/graph/dependency-tree?${q}`);
+    const tree = env.data || {};
+    const rawNodes = tree.nodes || [];
+    const rawEdges = tree.edges || [];
+
+    if (!rawNodes.length) {
+      document.getElementById('graph-error').innerHTML =
+        `<div class="error-msg">No Maven module facts for ${esc(modulePath)}. Run a local or PR index on a Maven repo first.</div>`;
+      clearMavenTreeText();
+      renderGraph([], [], { artifactView: true });
+      graphBuilt = true;
+      return;
+    }
+
+    const rootModuleId = `${serviceId}::maven::${tree.rootModulePath || modulePath}`;
+    const nodes = rawNodes.map(n => ({
+      id: n.id,
+      name: n.symbolFqn || n.id,
+      label: mavenNodeDisplayLabel(n),
+      displayLabel: mavenNodeDisplayLabel(n),
+      nodeType: n.nodeType,
+      serviceId: serviceId,
+      freshness: freshness(serviceId),
+    }));
+
+    const links = rawEdges.map(e => ({
+      source: e.fromNode,
+      target: e.toNode,
+      edgeType: e.edgeType,
+      scope: e.scope,
+      kind: e.edgeType === 'CONTAINS_MODULE' ? 'contains' : 'artifact',
+    }));
+
+    let warn = '';
+    if (tree.unresolvedCount > 0) {
+      warn = `<div class="error-msg" style="border-color:rgba(210,153,34,.4);color:#d29922">${tree.unresolvedCount} unresolved version(s) — P2 tree resolution may be skipped; re-index with mvn available for full transitive tree.</div>`;
+    }
+    document.getElementById('graph-error').innerHTML = warn;
+
+    renderMavenTreeGraph(nodes, links, rootModuleId, { focusServiceId: serviceId, modulePath, moduleMeta, depth, scope });
+    renderMavenTreeText(nodes, links, {
+      serviceId, svc, modulePath, moduleMeta,
+      rootModulePath: tree.rootModulePath || modulePath,
+      depth, scope, includeExternal, unresolved: tree.unresolvedCount || 0,
+    });
+    graphBuilt = true;
+  } catch (e) {
+    document.getElementById('graph-error').innerHTML =
+      `<div class="error-msg">Maven tree load failed: ${esc(e.message)}</div>`;
+    clearMavenTreeText();
+  }
+}
+
+function clearMavenTreeText() {
+  const meta = document.getElementById('maven-tree-meta');
+  const pre = document.getElementById('maven-tree-text');
+  if (meta) meta.innerHTML = '';
+  if (pre) pre.textContent = '';
+}
+
+function buildMavenHierarchy(rootId, nodes, links) {
+  const nodeMap = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const childMap = {};
+  links.forEach(l => {
+    const src = l.source;
+    const tgt = l.target;
+    if (!nodeMap[src] || !nodeMap[tgt]) return;
+    if (!childMap[src]) childMap[src] = [];
+    if (!childMap[src].includes(tgt)) childMap[src].push(tgt);
+  });
+  function build(id, seen) {
+    if (seen.has(id)) return null;
+    seen.add(id);
+    const n = nodeMap[id];
+    if (!n) return null;
+    const kids = (childMap[id] || []).map(cid => build(cid, seen)).filter(Boolean);
+    return { ...n, children: kids.length ? kids : undefined };
+  }
+  return build(rootId, new Set());
+}
+
+function renderMavenTreeGraph(nodes, links, rootId, graphOpts = {}) {
+  const svg = d3.select('#graph-svg');
+  svg.selectAll('g').remove();
+  if (simulation) { simulation.stop(); simulation = null; }
+
+  const hierarchy = buildMavenHierarchy(rootId, nodes, links);
+  if (!hierarchy) {
+    renderGraph(nodes, links, { artifactView: true, focusServiceId: graphOpts.focusServiceId });
+    return;
+  }
+
+  const root = d3.hierarchy(hierarchy);
+  const nodeCount = root.descendants().length;
+  const W = document.getElementById('graph-svg').clientWidth || 900;
+  const H = Math.max(400, nodeCount * 28 + 80);
+
+  svg.attr('height', H);
+  zoomBehavior = d3.zoom().scaleExtent([0.2, 2.5]).on('zoom', e => gSel.attr('transform', e.transform));
+  svg.call(zoomBehavior);
+  gSel = svg.append('g').attr('transform', 'translate(80,40)');
+
+  const treeLayout = d3.tree().nodeSize([22, 280]);
+  treeLayout(root);
+
+  const linkGen = d3.linkHorizontal().x(d => d.y).y(d => d.x);
+  gSel.append('g').selectAll('path')
+    .data(root.links()).join('path')
+    .attr('class', 'link tree-link')
+    .attr('d', linkGen);
+
+  const node = gSel.append('g').selectAll('g')
+    .data(root.descendants()).join('g')
+    .attr('class', d => {
+      let cls = 'node tree-node';
+      if (d.data.nodeType === 'ARTIFACT') cls += ' artifact';
+      if (d.data.nodeType === 'MAVEN_MODULE') cls += ' module';
+      return cls;
+    })
+    .attr('transform', d => `translate(${d.y},${d.x})`)
+    .on('click', (e, d) => {
+      if (d.data.serviceId) showGraphDetail(d.data.serviceId, { mavenTreeRoot: graphOpts.focusServiceId, mavenModulePath: graphOpts.modulePath });
+    })
+    .on('mouseover', showTooltip)
+    .on('mousemove', moveTooltip)
+    .on('mouseout', hideTooltip);
+
+  node.append('circle')
+    .attr('r', d => d.data.nodeType === 'ARTIFACT' ? 5 : 7)
+    .attr('cx', -8)
+    .attr('fill', d => nodeColorByType(d.data))
+    .attr('stroke', d => nodeColorByType(d.data));
+
+  node.append('text')
+    .attr('x', 4)
+    .attr('dy', '0.32em')
+    .text(d => {
+      const label = mavenNodeDisplayLabel(d.data);
+      return label.length > 52 ? label.slice(0, 50) + '…' : label;
+    });
+
+  svgSel = svg;
+  svg.transition().duration(400).call(zoomBehavior.transform, d3.zoomIdentity);
+}
+
+function renderMavenTreeText(nodes, links, ctx) {
+  const meta = document.getElementById('maven-tree-meta');
+  const pre = document.getElementById('maven-tree-text');
+  if (!meta || !pre) return;
+
+  const mod = ctx.moduleMeta || {};
+  const gav = mod.groupId && mod.artifactId
+    ? `${mod.groupId}:${mod.artifactId}:${mod.packaging || 'jar'}:${mod.version || '?'}`
+    : ctx.modulePath;
+  meta.innerHTML = `
+    <div><strong>${esc(ctx.svc ? ctx.svc.serviceName : ctx.serviceId)}</strong> · module <code>${esc(ctx.modulePath)}</code></div>
+    <div>scope=${esc(ctx.scope)} · depth=${ctx.depth === 0 ? 'all' : ctx.depth} · ${ctx.includeExternal ? 'all artifacts' : 'com.quotient only'} · ${nodes.length} nodes / ${links.length} edges${ctx.unresolved ? ` · ${ctx.unresolved} unresolved` : ''}</div>
+    <div style="margin-top:4px;font-size:11px;color:#6e7681">Equivalent: curl …/v1/graph/dependency-tree?serviceId=…&amp;modulePath=${esc(ctx.modulePath)}&amp;depth=${ctx.depth}&amp;scope=${esc(ctx.scope)}</div>`;
+
+  const rootId = `${ctx.serviceId}::maven::${ctx.rootModulePath}`;
+  const hierarchy = buildMavenHierarchy(rootId, nodes, links);
+  if (!hierarchy) {
+    pre.textContent = gav + '\n(no edges — check index or enable tree resolution)';
+    return;
+  }
+
+  const lines = [];
+  function walk(node, prefix, isLast, isRoot) {
+    const label = mavenNodeDisplayLabel(node);
+    const branch = isRoot ? '' : (isLast ? '\\- ' : '+- ');
+    const cls = node.nodeType === 'MAVEN_MODULE' ? 'tree-module' : '';
+    lines.push({ text: prefix + branch + label, cls });
+    const kids = node.children || [];
+    const ext = isRoot ? '' : (prefix + (isLast ? '   ' : '|  '));
+    kids.forEach((child, i) => walk(child, ext, i === kids.length - 1, false));
+  }
+  walk(hierarchy, '', true, true);
+  pre.innerHTML = lines.map(l => `<span class="${l.cls}">${esc(l.text)}</span>`).join('\n');
+}
+
+function renderGraph(nodes, links, graphOpts = {}) {
+  const svg  = d3.select('#graph-svg');
+  svg.attr('height', null);
+  svg.selectAll('g').remove();
+  const W = document.getElementById('graph-svg').clientWidth  || 900;
+  const H = document.getElementById('graph-svg').clientHeight || 600;
+
+  zoomBehavior = d3.zoom().scaleExtent([0.08, 4]).on('zoom', e => gSel.attr('transform', e.transform));
+  svg.call(zoomBehavior);
+  gSel = svg.append('g');
+
+  // Only keep links where both endpoints exist as nodes
+  const nodeSet = new Set(nodes.map(n => n.id));
+  const validLinks = links.filter(l => nodeSet.has(l.source) && nodeSet.has(l.target));
+
+  const link = gSel.append('g').selectAll('line')
+    .data(validLinks).join('line')
+    .attr('class', d => {
+      let c = 'link';
+      if (d.kind === 'maven') c += ' maven';
+      if (d.kind === 'contains' || d.edgeType === 'CONTAINS_MODULE') c += ' contains-module';
+      if (d.kind === 'artifact' || d.edgeType === 'DEPENDS_ON_ARTIFACT') c += ' depends-artifact';
+      return c;
+    })
+    .attr('marker-end', 'url(#arrow)');
+
+  const node = gSel.append('g').selectAll('g')
+    .data(nodes).join('g').attr('class', d => {
+      let cls = 'node';
+      if (d.nodeType === 'ARTIFACT') cls += ' artifact';
+      if (d.nodeType === 'MAVEN_MODULE') cls += ' module';
+      return cls;
+    })
+    .call(d3.drag()
+      .on('start', (e,d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+      .on('drag',  (e,d) => { d.fx=e.x; d.fy=e.y; })
+      .on('end',   (e,d) => { if (!e.active) simulation.alphaTarget(0); d.fx=null; d.fy=null; }))
+    .on('click', (e,d) => {
+      if (graphOpts.artifactView && d.serviceId) {
+        showGraphDetail(d.serviceId, { mavenTreeRoot: graphOpts.focusServiceId });
+      } else if (!graphOpts.artifactView) {
+        selectNode(d);
+        showGraphDetail(d.id);
+      }
+    })
+    .on('mouseover', showTooltip)
+    .on('mousemove', moveTooltip)
+    .on('mouseout',  hideTooltip);
+
+  node.append('circle')
+    .attr('r', d => graphOpts.artifactView ? (d.nodeType === 'ARTIFACT' ? 7 : 9) : 9)
+    .attr('fill',   d => nodeColorByType(d))
+    .attr('stroke', d => nodeColorByType(d))
+    .style('opacity', 0.85);
+
+  node.append('text').attr('dy', 21).attr('text-anchor', 'middle')
+    .text(d => nodeLabel(d));
+
+  simulation = d3.forceSimulation(nodes)
+    .force('link',      d3.forceLink(validLinks).id(d=>d.id).distance(130))
+    .force('charge',    d3.forceManyBody().strength(-320))
+    .force('center',    d3.forceCenter(W/2, H/2))
+    .force('collision', d3.forceCollide(28))
+    .on('tick', () => {
+      link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y)
+          .attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+      node.attr('transform', d => `translate(${d.x},${d.y})`);
+    });
+
+  svgSel = svg;
+}
+
+function selectNode(d) {
+  if (!gSel) return;
+  gSel.selectAll('.node').classed('selected', n => n.id === d.id);
+  gSel.selectAll('.link')
+    .classed('highlighted', l => l.source.id===d.id || l.target.id===d.id)
+    .attr('marker-end', l =>
+      (l.source.id===d.id||l.target.id===d.id) ? 'url(#arrow-hl)' : 'url(#arrow)');
+}
+
+function highlightInGraph(serviceId) {
+  showTab('graph');
+  if (graphMode !== 'services') setGraphMode('services');
+  if (!graphBuilt) { setTimeout(() => highlightInGraph(serviceId), 800); return; }
+  const nd = (gSel && gSel.selectAll('.node').data().find(n => n.id === serviceId));
+  if (!nd) return;
+  selectNode(nd);
+  showGraphDetail(serviceId);
+  if (svgSel && zoomBehavior) {
+    const W = document.getElementById('graph-svg').clientWidth;
+    const H = document.getElementById('graph-svg').clientHeight;
+    svgSel.transition().duration(600).call(
+      zoomBehavior.transform,
+      d3.zoomIdentity.translate(W/2 - nd.x, H/2 - nd.y).scale(1.3));
+  }
+}
+
+async function showGraphDetail(serviceId, opts = {}) {
+  const svc = allServices.find(s => s.serviceId === serviceId);
+  if (!svc) return;
+  const panel = document.getElementById('graph-detail');
+  panel.style.display = 'block';
+
+  let statusRows = '';
+  try {
+    const env = await api(`/v1/status/${serviceId}`);
+    const f   = env.freshnessStatus || 'NOT_INDEXED';
+    const sha = env.commitSha || (env.data && env.data.commitSha) || '—';
+    const at  = env.indexedAt || (env.data && env.data.indexedAt) || '—';
+    const orgSt = statusMap[serviceId] || {};
+    statusRows = `
+      <span class="svc-status status-${f}">${f}</span>
+      <span class="detail-row" style="margin-left:12px;font-size:12px;color:#8b949e">
+        commit: <code>${sha}</code> &nbsp;·&nbsp; indexed: ${at}
+        &nbsp;·&nbsp; job: ${orgSt.lastJobId||'—'} (${orgSt.lastJobStatus||'—'})
+      </span>`;
+  } catch(_) {}
+
+  const isMaven = (svc.buildTool || '').toUpperCase() === 'MAVEN';
+  const mavenBlock = isMaven
+    ? `<div id="graph-detail-maven" class="impact-section" style="margin-top:10px">
+         <h4 style="font-size:11px;color:#8b949e;text-transform:uppercase">Maven dependencies</h4>
+         <div class="loading" style="padding:8px">Loading…</div>
+       </div>`
+    : '';
+
+  panel.innerHTML = `
+    <h3>${svc.serviceName}
+      <span style="font-size:11px;color:#8b949e;font-weight:400;margin-left:8px">${svc.orgId} / ${svc.repo}</span>
+      <button class="btn" style="float:right;font-size:11px;padding:2px 8px" onclick="document.getElementById('graph-detail').style.display='none'">✕</button>
+    </h3>
+    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:12px">${statusRows}</div>
+    <div id="graph-detail-triggers">${triggersForCard(serviceId)}</div>
+    ${mavenBlock}
+    ${isMaven ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" onclick="showMavenArtifactTree('${serviceId}')">Maven artifact tree</button>
+      <button class="btn" onclick="setGraphMode('maven-services'); graphBuilt=false; buildGraph()">Show Maven cross-service links</button>
+    </div>` : ''}
+    ${opts.mavenTreeRoot ? `<div class="svc-meta" style="margin-top:6px">Artifact tree${opts.mavenModulePath ? ` · module ${esc(opts.mavenModulePath)}` : ''} (service ${esc(opts.mavenTreeRoot)})</div>` : ''}`;
+
+  if (freshness(serviceId) !== 'NOT_INDEXED' && !(serviceId in triggerMap)) {
+    try {
+      const env = await api(`/v1/facts/entry-triggers?serviceId=${encodeURIComponent(serviceId)}`);
+      triggerMap[serviceId] = env.data || [];
+      document.getElementById('graph-detail-triggers').innerHTML = renderTriggersBlock(triggerMap[serviceId], 8);
+    } catch(_) {}
+  }
+
+  if (isMaven && freshness(serviceId) !== 'NOT_INDEXED') {
+    loadGraphDetailMaven(serviceId);
+  } else if (isMaven) {
+    const el = document.getElementById('graph-detail-maven');
+    if (el) el.innerHTML = '<h4>Maven dependencies</h4><div class="empty">Not indexed</div>';
+  }
+}
+
+async function loadGraphDetailMaven(serviceId) {
+  const el = document.getElementById('graph-detail-maven');
+  if (!el) return;
+  try {
+    const env = await api(
+      `/v1/facts/maven-dependencies?serviceId=${encodeURIComponent(serviceId)}&scope=runtime&directOnly=true`);
+    const deps = (env.data && env.data.dependencies) || [];
+    if (!deps.length) {
+      el.innerHTML = '<h4>Maven dependencies</h4><div class="empty">No indexed Maven facts</div>';
+      return;
+    }
+    const rows = deps.slice(0, 25).map(d => {
+      const coord = `${d.groupId}:${d.artifactId}:${d.version || d.versionLiteral || '?'}`;
+      const linked = d.linkedServiceId
+        ? `<span class="linked" onclick="highlightInGraph('${d.linkedServiceId}')">${d.linkedServiceId}</span>`
+        : '';
+      return `<div class="maven-dep-row">${esc(d.fromModulePath || '.')} → ${esc(coord)} ${linked}</div>`;
+    }).join('');
+    el.innerHTML = `<h4>Maven dependencies (${deps.length} direct runtime)</h4>${rows}`;
+  } catch(_) {
+    el.innerHTML = '<h4>Maven dependencies</h4><div class="empty">Could not load</div>';
+  }
+}
+
+function graphZoom(f) { if (svgSel) svgSel.transition().duration(250).call(zoomBehavior.scaleBy, f); }
+function resetZoom()  { if (svgSel) svgSel.transition().duration(400).call(zoomBehavior.transform, d3.zoomIdentity); }
+
+function showTooltip(e, d) {
+  const t = document.getElementById('graph-tooltip');
+  const st = statusMap[d.id] || statusMap[d.serviceId] || {};
+  const extra = d.nodeType ? `<br><span style="color:#8b949e">${d.nodeType}</span>` : '';
+  t.innerHTML = `<strong>${esc(d.name || d.label || d.id)}</strong>${extra}<br>
+    <span style="color:#8b949e">${d.freshness || ''}</span>
+    ${st.lastCommitSha ? `<br><span style="color:#8b949e;font-family:monospace">${st.lastCommitSha.slice(0,8)}</span>` : ''}`;
+  t.style.display = 'block';
+  moveTooltip(e);
+}
+function moveTooltip(e) {
+  const t  = document.getElementById('graph-tooltip');
+  const cr = document.getElementById('graph-container').getBoundingClientRect();
+  t.style.left = (e.clientX - cr.left + 14) + 'px';
+  t.style.top  = (e.clientY - cr.top  - 10) + 'px';
+}
+function hideTooltip() { document.getElementById('graph-tooltip').style.display = 'none'; }
+
+// ── Impact tab ────────────────────────────────────────────────────────────────
+function populateJourneySelect() {
+  const sel = document.getElementById('journey-svc');
+  if (!sel) return;
+  sel.innerHTML = allServices.map(s =>
+    `<option value="${s.serviceId}">${s.serviceName} (${s.orgId}/${s.repo})</option>`
+  ).join('');
+  // Pre-fill org from first service
+  const orgEl = document.getElementById('journey-org');
+  if (orgEl && !orgEl.value && allServices.length) orgEl.value = allServices[0].orgId;
+  loadJourneyTopics();
+}
+
+function journeyEnvFilter() {
+  const env = document.getElementById('journey-env2')?.value || 'pdn';
+  return env;
+}
+
+function onJourneyTopicChange() {
+  const sel = document.getElementById('journey-topic');
+  const envSel = document.getElementById('journey-env2');
+  if (!sel || !envSel) return;
+  const opt = sel.selectedOptions[0];
+  if (opt?.dataset?.env) envSel.value = opt.dataset.env;
+}
+
+async function loadJourneyTopics() {
+  const sel = document.getElementById('journey-topic');
+  if (!sel) return;
+  const orgId = (document.getElementById('journey-org').value || '').trim();
+  const envFilter = journeyEnvFilter();
+  const showAllEnvs = !envFilter;
+  const prev = sel.value;
+  const prevEnv = sel.selectedOptions[0]?.dataset?.env;
+  if (!orgId) {
+    sel.innerHTML = '<option value="">Enter org ID first</option>';
+    return;
+  }
+  sel.disabled = true;
+  sel.innerHTML = '<option value="">Loading topics…</option>';
+  try {
+    const params = new URLSearchParams({ orgId, resourceKind: 'TOPIC' });
+    if (envFilter) params.set('env', envFilter);
+    const resp = await api(`/v1/facts/pubsub/org?${params}`);
+    const seen = new Set();
+    const entries = (resp.data || []).filter(p => p.shortId).filter(p => {
+      const lane = p.envLane || 'unknown';
+      const transport = p.transport || 'PUBSUB';
+      const key = `${lane}|${transport}|${p.shortId}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).sort((a, b) => {
+      const ae = a.envLane || 'unknown', be = b.envLane || 'unknown';
+      const at = a.transport || 'PUBSUB', bt = b.transport || 'PUBSUB';
+      return ae.localeCompare(be) || at.localeCompare(bt) || a.shortId.localeCompare(b.shortId);
+    });
+    if (!entries.length) {
+      sel.innerHTML = '<option value="">No topics indexed for this org/env</option>';
+      return;
+    }
+    sel.innerHTML = '<option value="">Select topic…</option>' +
+      entries.map(p => {
+        const lane = p.envLane || 'unknown';
+        const transport = p.transport || 'PUBSUB';
+        const transportTag = transport !== 'PUBSUB' ? ` · ${transport}` : '';
+        const label = showAllEnvs ? `[${lane}] ${p.shortId}${transportTag}` : `${p.shortId}${transportTag}`;
+        return `<option value="${esc(p.shortId)}" data-env="${esc(lane)}" data-transport="${esc(transport)}">${esc(label)}</option>`;
+      }).join('');
+    if (prev) {
+      const match = [...sel.options].find(o => o.value === prev && (!prevEnv || o.dataset.env === prevEnv));
+      if (match) sel.value = prev;
+    }
+  } catch(_) {
+    sel.innerHTML = '<option value="">Could not load topics</option>';
+  } finally {
+    sel.disabled = false;
+  }
+}
+
+function populateImpactSelect() {
+  const sel = document.getElementById('impact-svc');
+  sel.innerHTML = allServices
+    .filter(s => (statusMap[s.serviceId] || {}).freshnessStatus === 'CURRENT'
+              || (statusMap[s.serviceId] || {}).freshnessStatus === 'STALE')
+    .concat(allServices.filter(s => {
+      const f = (statusMap[s.serviceId] || {}).freshnessStatus;
+      return f !== 'CURRENT' && f !== 'STALE';
+    }))
+    .map(s => {
+      const f = (statusMap[s.serviceId] || {}).freshnessStatus || 'NOT_INDEXED';
+      const badge = f === 'CURRENT' ? '✓' : f === 'STALE' ? '~' : '✗';
+      return `<option value="${s.serviceId}">${badge} ${s.serviceName}</option>`;
+    }).join('');
+  onImpactServiceChange();
+}
+
+function onImpactServiceChange() {
+  const svcId = document.getElementById('impact-svc').value;
+  const st = statusMap[svcId] || {};
+  if (st.lastCommitSha) {
+    document.getElementById('impact-sha').value = st.lastCommitSha;
+  }
+}
+
+async function runImpact() {
+  const svcId = document.getElementById('impact-svc').value;
+  const sha   = document.getElementById('impact-sha').value.trim();
+  const errEl = document.getElementById('impact-error');
+  const resEl = document.getElementById('impact-result');
+  errEl.innerHTML = '';
+  if (!sha) { errEl.innerHTML = '<div class="error-msg">Enter a commit SHA.</div>'; return; }
+  resEl.innerHTML = '<div class="loading">Analyzing…</div>';
+
+  try {
+    // GET /v1/impact/pr → ResponseEnvelope<ImpactReport>
+    // ImpactReport { serviceId, commitSha, changedSymbols, affectedConsumers,
+    //                downstreamDependencies, externalDownstreamDependencies,
+    //                suggestedTestScope, missingTestClasses }
+    const env = await api(`/v1/impact/pr?serviceId=${svcId}&commitSha=${sha}`);
+    const d   = env.data || {};
+
+    const tags = (arr, fn) =>
+      arr && arr.length ? arr.map(fn).join('') : '<em style="color:#8b949e">none</em>';
+
+    resEl.innerHTML = `
+      <div class="detail-panel">
+        <h3>Impact — <span style="font-family:monospace;font-size:13px">${sha.slice(0,8)}</span>
+            <span class="svc-status status-${env.freshnessStatus}" style="margin-left:10px">${env.freshnessStatus}</span></h3>
+
+        <div class="impact-section">
+          <h4>Changed Symbols (${(d.changedSymbols||[]).length})</h4>
+          ${tags(d.changedSymbols, s =>
+            `<span class="impact-tag" title="${s.filePath||''}">${s.symbolFqn}${s.httpMethod?` [${s.httpMethod} ${s.path||''}]`:''}</span>`)}
+        </div>
+
+        <div class="impact-section">
+          <h4>Affected Consumers (${(d.affectedConsumers||[]).length})</h4>
+          ${tags(d.affectedConsumers, c =>
+            `<span class="impact-tag" title="${c.consumerClass||''}">${c.consumerServiceName||c.consumerServiceId||c.source}</span>`)}
+        </div>
+
+        <div class="impact-section">
+          <h4>Downstream Dependencies (${(d.downstreamDependencies||[]).length})</h4>
+          ${tags(d.downstreamDependencies, c =>
+            `<span class="impact-tag">${c.httpMethod||''} ${c.path||''} ← ${c.callerClass||''}</span>`)}
+        </div>
+
+        <div class="impact-section">
+          <h4>Suggested Tests</h4>
+          ${tags(d.suggestedTestScope, t =>
+            `<span class="impact-tag ${t.exists?'exists':'missing'}" title="${t.reason||''}">${t.type}: ${t.className}</span>`)}
+        </div>
+
+        <div class="impact-section">
+          <h4>Missing Test Classes (${(d.missingTestClasses||[]).length})</h4>
+          ${tags(d.missingTestClasses, c => `<span class="impact-tag missing">${c}</span>`)}
+        </div>
+      </div>`;
+  } catch(e) {
+    errEl.innerHTML = `<div class="error-msg">${e.message}</div>`;
+    resEl.innerHTML = '';
+  }
+}
+
+// ── Journey tab ───────────────────────────────────────────────────────────────
+let journeyMode = 'entry';
+let eventFlowViewMode = (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('ts-event-flow-view')) || 'pipeline';
+let eventFlowFocusServiceId = (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('ts-event-flow-focus')) || '';
+let eventFlowHighlightPath = typeof sessionStorage === 'undefined' || sessionStorage.getItem('ts-event-flow-highlight') !== 'false';
+let lastEventFlowReport = null;
+let lastEventFlowEnvelope = null;
+const eventFlowNodePayloads = {};
+let eventFlowGraphZoom = null;
+let eventFlowGraphSvg = null;
+
+function onEventFlowFocusChange() {
+  const el = document.getElementById('journey-focus-svc');
+  eventFlowFocusServiceId = el ? el.value : '';
+  try { sessionStorage.setItem('ts-event-flow-focus', eventFlowFocusServiceId); } catch (_) {}
+  if (lastEventFlowReport) applyEventFlowView(lastEventFlowReport, eventFlowViewMode);
+}
+
+function onEventFlowLiveVerifyChange() {
+  if (lastEventFlowReport) runJourney();
+}
+
+function onEventFlowHighlightChange() {
+  const el = document.getElementById('journey-highlight-path');
+  eventFlowHighlightPath = el ? el.checked : true;
+  try { sessionStorage.setItem('ts-event-flow-highlight', eventFlowHighlightPath ? 'true' : 'false'); } catch (_) {}
+  if (lastEventFlowReport && eventFlowViewMode === 'graph') mountEventFlowGraph(lastEventFlowReport);
+}
+
+function teardownEventFlowGraph() {
+  eventFlowGraphSvg = null;
+  eventFlowGraphZoom = null;
+}
+
+function setEventFlowView(mode) {
+  eventFlowViewMode = mode;
+  try { sessionStorage.setItem('ts-event-flow-view', mode); } catch (_) { /* private mode */ }
+  document.querySelectorAll('.event-view-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.eventView === mode));
+  if (lastEventFlowReport) applyEventFlowView(lastEventFlowReport, mode);
+}
+
+function applyEventFlowView(report, mode) {
+  teardownEventFlowGraph();
+  Object.keys(eventFlowNodePayloads).forEach(k => delete eventFlowNodePayloads[k]);
+  const canvas = document.getElementById('journey-canvas');
+  if (mode === 'graph') {
+    canvas.innerHTML = renderEventFlowGraphShell(report);
+    requestAnimationFrame(() => mountEventFlowGraph(report));
+  } else {
+    canvas.innerHTML = renderEventFlow(report, mode);
+  }
+}
+
+function populateFocusServiceSelect(report) {
+  const sel = document.getElementById('journey-focus-svc');
+  if (!sel || !report) return;
+  const seen = new Map();
+  (report.hops || []).forEach(hop => {
+    [...(hop.publishers || []), ...(hop.subscribers || [])].forEach(p => {
+      if (p.serviceId && !seen.has(p.serviceId)) seen.set(p.serviceId, p.serviceName || p.serviceId);
+    });
+  });
+  const opts = ['<option value="">All services</option>'];
+  [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1])).forEach(([id, name]) => {
+    opts.push(`<option value="${esc(id)}"${id === eventFlowFocusServiceId ? ' selected' : ''}>${esc(name)}</option>`);
+  });
+  sel.innerHTML = opts.join('');
+  if (eventFlowFocusServiceId && !seen.has(eventFlowFocusServiceId)) {
+    eventFlowFocusServiceId = '';
+    try { sessionStorage.setItem('ts-event-flow-focus', ''); } catch (_) {}
+  }
+}
+
+function setJourneyMode(mode) {
+  journeyMode = mode;
+  document.querySelectorAll('.mode-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === mode));
+  document.getElementById('journey-entry-fields').style.display = mode === 'entry' ? 'flex' : 'none';
+  document.getElementById('journey-event-fields').style.display = mode === 'event' ? 'flex' : 'none';
+  document.getElementById('journey-flow-fields').style.display = mode === 'flow' ? 'flex' : 'none';
+  document.getElementById('journey-canvas').innerHTML = '';
+  document.getElementById('journey-error').innerHTML = '';
+  if (mode === 'event') {
+    syncEventFlowViewButtons();
+    const lv = document.getElementById('journey-live-verify');
+    const hp = document.getElementById('journey-highlight-path');
+    if (hp) hp.checked = eventFlowHighlightPath;
+    loadJourneyTopics();
+  }
+  if (mode === 'flow') {
+    const flowSvc = document.getElementById('journey-flow-svc');
+    const entrySvc = document.getElementById('journey-svc');
+    if (flowSvc && entrySvc) flowSvc.innerHTML = entrySvc.innerHTML;
+  }
+}
+
+async function runJourney() {
+  const errEl  = document.getElementById('journey-error');
+  const canvas = document.getElementById('journey-canvas');
+  errEl.innerHTML = '';
+  canvas.innerHTML = '<div class="loading">Tracing journey…</div>';
+
+  try {
+    if (journeyMode === 'entry') {
+      const svcId = document.getElementById('journey-svc').value;
+      const path  = document.getElementById('journey-path').value.trim();
+      const env   = document.getElementById('journey-env').value;
+      const params = new URLSearchParams({ serviceId: svcId, env });
+      if (path) params.set(path.startsWith('/') || !path.includes('-') ? 'path' : 'triggerId', path);
+      const resp = await api(`/v1/graph/entry-flow?${params}`);
+      if (!resp.data || !(resp.data.steps || []).length) {
+        canvas.innerHTML = '<div class="loading">No entry triggers found for this service / path. Index the service first or broaden the filter.</div>';
+        return;
+      }
+      canvas.innerHTML = renderEntryFlow(resp.data, allServices.find(s => s.serviceId === svcId));
+    } else if (journeyMode === 'flow') {
+      const svcId = document.getElementById('journey-flow-svc').value;
+      const anchor = document.getElementById('journey-flow-anchor').value.trim();
+      const prefix = document.getElementById('journey-flow-prefix').value.trim();
+      const svc = allServices.find(s => s.serviceId === svcId);
+      if (!anchor) {
+        errEl.innerHTML = '<div class="error-msg">Anchor is required (e.g. handlerFqn:com...Consumer.method)</div>';
+        canvas.innerHTML = '';
+        return;
+      }
+      const params = new URLSearchParams({
+        serviceId: svcId,
+        orgId: svc?.orgId || 'quotient',
+        anchor,
+        format: 'mermaid',
+        includeMessaging: 'true',
+        includeExternalDomain: 'true',
+      });
+      if (prefix) params.set('packagePrefix', prefix);
+      const resp = await api(`/v1/graph/flow-diagram?${params}`);
+      const mermaid = resp.data?.mermaid || '(no mermaid output)';
+      const stats = resp.data?.stats;
+      const gaps = resp.data?.gaps || [];
+      canvas.innerHTML = `
+        <div class="pill-row">${stats ? `nodes ${stats.nodeCount} · edges ${stats.edgeCount}` : ''}</div>
+        ${gaps.length ? `<div class="error-msg" style="margin-bottom:8px">${gaps.length} messaging gap(s)</div>` : ''}
+        <pre style="white-space:pre-wrap;font-size:12px;background:#0d1117;padding:12px;border-radius:6px">${esc(mermaid)}</pre>`;
+    } else {
+      const orgId   = document.getElementById('journey-org').value.trim();
+      const shortId = document.getElementById('journey-topic').value.trim();
+      const topicOpt = document.getElementById('journey-topic').selectedOptions[0];
+      let env = document.getElementById('journey-env2').value;
+      if (!env) env = topicOpt?.dataset?.env || 'pdn';
+      if (!orgId || !shortId) {
+        errEl.innerHTML = '<div class="error-msg">Org ID and topic short ID are both required.</div>';
+        canvas.innerHTML = '';
+        return;
+      }
+      const params = new URLSearchParams({ orgId, shortId, env, maxHops: 12 });
+      const followMode = document.getElementById('journey-follow-mode')?.value;
+      if (followMode) params.set('followMode', followMode);
+      const liveVerify = document.getElementById('journey-live-verify')?.checked;
+      if (liveVerify) params.set('liveVerify', 'true');
+      const resp = await api(`/v1/graph/event-flow/cross-repo?${params}`);
+      if (!resp.data || !(resp.data.hops || []).length) {
+        lastEventFlowReport = null;
+        lastEventFlowEnvelope = null;
+        canvas.innerHTML = '<div class="loading">No hops found for this topic. Make sure the relevant services are indexed.</div>';
+        return;
+      }
+      lastEventFlowReport = resp.data;
+      lastEventFlowEnvelope = resp;
+      populateFocusServiceSelect(resp.data);
+      syncEventFlowViewButtons();
+      applyEventFlowView(resp.data, eventFlowViewMode);
+    }
+  } catch(e) {
+    errEl.innerHTML = `<div class="error-msg">${e.message}</div>`;
+    canvas.innerHTML = '';
+  }
+}
+
+// ── Entry flow renderer ────────────────────────────────────────────────────────
+/** True when report includes a downstream messaging chain (TRG-12), not a trigger catalog. */
+function entryFlowHasMessagingChain(report) {
+  const hops = report.crossRepoFlow?.hops;
+  const msgSteps = report.messagingFlow?.steps;
+  return (hops && hops.length > 0) || (msgSteps && msgSteps.length > 0);
+}
+
+/** Independent inbound triggers for one service — not a sequential call chain. */
+function entryFlowIsTriggerCatalog(report) {
+  const steps = report.steps || [];
+  return steps.length > 1 && !entryFlowHasMessagingChain(report);
+}
+
+function renderEntryStepCard(step, stepLabel) {
+  const t = step.trigger;
+  const kindLabel = t.triggerKind || 'TRIGGER';
+  const pathLine = t.httpMethod
+    ? `${t.httpMethod} ${t.pathPattern || '?'}`
+    : (t.pathPattern || t.triggerId || '—');
+  const handlerShort = t.linkedHandlerFqn
+    ? t.linkedHandlerFqn.split('.').slice(-2).join('.') + (t.linkedMethod ? '.' + t.linkedMethod + '()' : '')
+    : null;
+  const reads  = (step.reads  || []).map(r =>
+    `<div class="db-row db-read">▶ ${esc(r.tableOrEntity || r.storeType || '?')}</div>`).join('');
+  const writes = (step.writes || []).map(w =>
+    `<div class="db-row db-write">✎ ${esc(w.tableOrEntity || w.storeType || '?')}</div>`).join('');
+  const gates  = (step.gates  || []).map(g =>
+    `<div class="gate-row">⚑ ${esc(g.gateKey || g.gateKind)} = ${esc(g.requiredValue || '?')}</div>`).join('');
+  const actorBit    = t.actor    ? `<span class="actor-badge">${esc(t.actor)}</span>` : '';
+  const boundaryBit = t.boundary ? `<span class="boundary-badge">${esc(t.boundary)}</span>` : '';
+  const hasData = reads || writes || gates;
+  const labelHtml = stepLabel != null
+    ? `<div class="step-num">${esc(stepLabel)}</div>`
+    : '';
+
+  return `<div class="entry-step">
+    <div class="entry-step-card">
+      ${labelHtml}
+      <span class="trigger-kind-badge">${esc(kindLabel)}</span>${actorBit}${boundaryBit}
+      <div class="entry-path">${esc(pathLine)}</div>
+      ${handlerShort ? `<div class="entry-handler" title="${esc(t.linkedHandlerFqn || '')}">${esc(handlerShort)}</div>` : ''}
+      ${hasData ? `<div style="border-top:1px solid #21262d;margin:8px 0 6px"></div>` : ''}
+      ${reads}${writes}${gates}
+    </div>
+  </div>`;
+}
+
+function hopTransport(hop) {
+  return (hop && hop.transport) || 'PUBSUB';
+}
+
+function transportBadgeHtml(transport) {
+  const t = transport || 'PUBSUB';
+  const cls = t === 'KAFKA' ? 'transport-kafka' : 'transport-pubsub';
+  return `<span class="transport-badge ${cls}">${esc(t)}</span>`;
+}
+
+function renderMessagingHopCard(hop, index, topicFallback) {
+  const topic = hop.topicShortId || topicFallback || reportTopicFromHop(hop);
+  const transport = hopTransport(hop);
+  const handler = hop.handler || hop.workload || null;
+  const handlerShort = handler
+    ? String(handler).split('.').slice(-2).join('.')
+    : null;
+  return `<div class="entry-step">
+    <div class="entry-step-card">
+      <div class="step-num">Hop ${index}</div>
+      ${transportBadgeHtml(transport)}
+      <div class="entry-path">${esc(topic || '—')}</div>
+      ${handlerShort ? `<div class="entry-handler">${esc(handlerShort)}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function reportTopicFromHop(hop) {
+  if (hop.topicShortId) return hop.topicShortId;
+  const pub = (hop.publishers || [])[0];
+  const sub = (hop.subscribers || [])[0];
+  return pub?.shortId || sub?.shortId || null;
+}
+
+function entryFlowMessagingHops(report) {
+  const crossRepo = report.crossRepoFlow?.hops || [];
+  if (crossRepo.length) return crossRepo;
+  return report.messagingFlow?.steps || [];
+}
+
+function renderEntryFlow(report, svc) {
+  const svcName = svc ? svc.serviceName : report.serviceId;
+  const steps   = report.steps || [];
+  const catalog = entryFlowIsTriggerCatalog(report);
+  const msgHops = entryFlowMessagingHops(report);
+  const hasChain = msgHops.length > 0;
+  const containerClass = catalog ? 'entry-catalog' : 'entry-pipeline';
+  const subLabel = catalog
+    ? `${steps.length} independent entry trigger${steps.length !== 1 ? 's' : ''}`
+    : `${steps.length} trigger${steps.length !== 1 ? 's' : ''}${hasChain ? ' · linked chain' : ''}`;
+
+  let html = `<div class="journey-meta">
+    <span class="title">${esc(svcName)}</span>
+    <span class="sub">${esc(report.envLane || 'pdn')} · ${subLabel}</span>
+  </div><div class="${containerClass}">`;
+
+  steps.forEach(step => {
+    const label = catalog ? null : `Step ${step.order}`;
+    html += renderEntryStepCard(step, label);
+  });
+
+  if (hasChain) {
+    const topicHint = report.messagingTopicShortId
+      || report.crossRepoFlow?.startTopic
+      || report.messagingFlow?.topicShortId
+      || null;
+    if (steps.length > 0) html += '<div class="step-arrow">→</div>';
+    msgHops.forEach((hop, i) => {
+      if (i > 0) html += '<div class="step-arrow">→</div>';
+      html += renderMessagingHopCard(hop, hop.order != null ? hop.order : i + 1, topicHint);
+    });
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+function syncEventFlowViewButtons() {
+  document.querySelectorAll('.event-view-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.eventView === eventFlowViewMode));
+}
+
+function getEventFlowFocusId() {
+  return eventFlowFocusServiceId || null;
+}
+
+function hopTouchesFocus(hop, focusId) {
+  if (!focusId) return true;
+  return [...(hop.publishers || []), ...(hop.subscribers || [])].some(p => p.serviceId === focusId);
+}
+
+function participantNodeId(role, order, serviceId, idx) {
+  return `${role === 'pub' ? 'pub' : 'sub'}:${order}:${serviceId}:${idx}`;
+}
+
+function liveVerifyDotHtml(live) {
+  if (!live || !live.status) return '';
+  if (live.status === 'OK') return '<span class="live-dot ok" title="GCP OK"></span>';
+  if (live.status === 'SKIPPED' || live.status === 'DISABLED') return '<span class="live-dot skip" title="GCP verify skipped"></span>';
+  const tip = esc(live.status + (live.liveTopicShortId ? ': ' + live.liveTopicShortId : ''));
+  return `<span class="live-dot bad" title="${tip}"></span>`;
+}
+
+function handlerShortName(fqn) {
+  if (!fqn) return null;
+  return String(fqn).split('.').slice(-2).join('.');
+}
+
+function participantResourceLabel(p, hopTopic, role) {
+  if (role === 'sub' && p.shortId) return p.shortId;
+  if (role === 'pub') return hopTopic || p.shortId || p.role || 'PUBLISH';
+  return p.shortId || p.workloadName || p.role || '—';
+}
+
+function hintBadgesHtml(hints) {
+  return (hints || []).map(h =>
+    `<span class="hint-badge" title="${esc(h.scenarioId || '')}">🔁 ${esc(h.pattern || h.scopeKind || 'consistency')}</span>`
+  ).join('');
+}
+
+function gapBadgeTitle(g) {
+  const parts = [];
+  if (g.hopOrder != null) parts.push('hop ' + g.hopOrder);
+  if (g.topicShortId) parts.push(g.topicShortId);
+  if (g.description) parts.push(g.description);
+  return parts.join(' · ') || g.gapType || '';
+}
+
+function gapsForHop(gaps, hop) {
+  if (!gaps) return [];
+  const topicShortId = typeof hop === 'string' ? hop : hop.topicShortId;
+  const hopOrder = typeof hop === 'object' && hop != null ? hop.order : null;
+  if (!topicShortId && hopOrder == null) return [];
+  return gaps.filter(g =>
+    (hopOrder != null && g.hopOrder === hopOrder)
+    || (topicShortId && g.topicShortId === topicShortId)
+    || (topicShortId && (g.description || '').includes(topicShortId)));
+}
+
+function renderEventFlowNarrative(report) {
+  const lines = report.narrative || [];
+  if (!lines.length) return '';
+  const text = lines.join('\n');
+  return `<details class="event-flow-narrative" open>
+    <summary>Trace summary (${lines.length} lines)</summary>
+    <pre>${esc(text)}</pre>
+  </details>`;
+}
+
+function renderEventFlowTraceMeta(report) {
+  const parts = [];
+  if (report.followMode) {
+    parts.push(`<span class="pill">followMode=${esc(report.followMode)}</span>`);
+  }
+  if (report.skippedExpansionCount != null && report.skippedExpansionCount > 0) {
+    parts.push(`<span class="pill">skipped ${report.skippedExpansionCount} manifest expansion(s)</span>`);
+  }
+  if ((report.traceWarnings || []).length) {
+    parts.push(`<span class="pill" title="${esc(report.traceWarnings.join('\n'))}">⚠ ${report.traceWarnings.length} warning(s)</span>`);
+  }
+  if (!parts.length) return '';
+  return `<div class="event-flow-trace-meta">${parts.join('')}</div>`;
+}
+
+function renderEventFlowHopSummaries(report) {
+  const summaries = report.hopSummaries || [];
+  if (!summaries.length) return '';
+  const rows = summaries.map(h =>
+    `<div class="summary-line" title="Hop ${h.order}">${esc(h.summaryLine || h.topicShortId || '')}</div>`
+  ).join('');
+  return `<details class="event-flow-hop-summaries">
+    <summary>Hop summaries (${summaries.length})</summary>
+    ${rows}
+  </details>`;
+}
+
+function collectFirstHopInboundTriggers(hops) {
+  const seen = new Set();
+  const out = [];
+  for (const sub of ((hops[0] || {}).subscribers || [])) {
+    for (const t of (sub.inboundTriggers || [])) {
+      const key = t.triggerId || `${t.triggerKind}:${t.pathPattern}`;
+      if (!seen.has(key)) { seen.add(key); out.push(t); }
+    }
+  }
+  return out;
+}
+
+function renderEventFlowParticipant(p, role, hopTopic, nodeId, focusId) {
+  const svcName = p.serviceName || p.repo || p.serviceId || '—';
+  const res = participantResourceLabel(p, hopTopic, role);
+  const handler = handlerShortName(p.linkedClassFqn);
+  const hints = role === 'sub' ? hintBadgesHtml(p.consistencyHints) : '';
+  const live = role === 'sub' ? liveVerifyDotHtml(p.liveVerification) : '';
+  const title = [p.linkedClassFqn, p.repo, p.evidenceSource].filter(Boolean).join(' · ');
+  const roleIcon = role === 'pub' ? '↑' : '↓';
+  const fid = focusId != null ? focusId : getEventFlowFocusId();
+  const dim = fid && p.serviceId !== fid ? ' event-dimmed' : '';
+  if (nodeId) eventFlowNodePayloads[nodeId] = { role, participant: p, hopTopic };
+  const click = nodeId ? ` onclick="showEventFlowDetail('${String(nodeId).replace(/'/g, "\\'")}')"` : '';
+  return `<div class="event-participant ${role}${dim}" title="${esc(title)}"${click}>
+    <span class="event-participant-role">${roleIcon}</span>
+    <div>
+      <div class="event-participant-svc">${esc(svcName)}${live}</div>
+      <div class="event-participant-res">${esc(res)}</div>
+      ${handler ? `<div class="event-participant-handler">${esc(handler)}</div>` : ''}
+      ${hints ? `<div class="event-participant-badges">${hints}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function renderMatrixCell(pubs, subs, hopTopic, focusId) {
+  const fid = focusId != null ? focusId : getEventFlowFocusId();
+  const chips = [];
+  (pubs || []).forEach(p => {
+    const dim = fid && p.serviceId !== fid ? ' event-dimmed' : '';
+    const res = participantResourceLabel(p, hopTopic, 'pub');
+    const handler = handlerShortName(p.linkedClassFqn);
+    chips.push(`<div class="matrix-chip pub${dim}" title="${esc(p.linkedClassFqn || '')}">↑ ${esc(p.serviceName || p.serviceId)}
+      <span class="matrix-chip-res">${esc(res)}${handler ? ' · ' + esc(handler) : ''}</span></div>`);
+  });
+  (subs || []).forEach(p => {
+    const dim = fid && p.serviceId !== fid ? ' event-dimmed' : '';
+    const res = participantResourceLabel(p, hopTopic, 'sub');
+    const handler = handlerShortName(p.linkedClassFqn);
+    const live = liveVerifyDotHtml(p.liveVerification);
+    chips.push(`<div class="matrix-chip sub${dim}" title="${esc(p.linkedClassFqn || '')}">↓ ${esc(p.serviceName || p.serviceId)}${live}
+      <span class="matrix-chip-res">${esc(res)}${handler ? ' · ' + esc(handler) : ''}</span></div>`);
+  });
+  if (!chips.length) return '<div class="lane-cell empty"></div>';
+  return chips.join('');
+}
+
+function showEventFlowDetail(nodeId) {
+  const payload = eventFlowNodePayloads[nodeId];
+  if (!payload) return;
+  const panel = document.getElementById('event-flow-detail');
+  if (!panel) return;
+  panel.style.display = 'block';
+  renderEventFlowDetailPanel(payload, panel);
+  if (payload.role === 'pub' || payload.role === 'sub') {
+    loadEventFlowParticipantFacts(payload, panel);
+  }
+}
+
+function renderEventFlowDetailPanel(payload, panel) {
+  if (payload.role === 'entry') {
+    const triggers = payload.triggers || (payload.trigger ? [payload.trigger] : []);
+    const rows = triggers.map(t =>
+      `<div class="detail-row"><span class="key">${esc(t.triggerKind || 'TRIGGER')}</span><span class="val">${esc(t.pathPattern || t.triggerId || '—')}</span></div>`
+    ).join('');
+    panel.innerHTML = `<h3>Entry trigger${triggers.length !== 1 ? 's' : ''} (${triggers.length})
+      <button class="btn" style="float:right;font-size:11px;padding:2px 8px" onclick="document.getElementById('event-flow-detail').style.display='none'">✕</button></h3>${rows}`;
+    return;
+  }
+  if (payload.role === 'terminal') {
+    const c = payload.continuation;
+    panel.innerHTML = `<h3>Terminal continuation</h3>
+      <div class="detail-row"><span class="key">Kind</span><span class="val">${esc(c.triggerKind || '—')}</span></div>
+      <div class="detail-row"><span class="key">Job</span><span class="val">${esc(c.cronJobName || c.note || '—')}</span></div>
+      <div class="detail-row"><span class="key">Service</span><span class="val">${esc(c.serviceId || '—')}</span></div>`;
+    return;
+  }
+  if (payload.role === 'topic') {
+    const hop = payload.hop || {};
+    panel.innerHTML = `<h3>Topic hop ${hop.order != null ? hop.order : ''}
+      <button class="btn" style="float:right;font-size:11px;padding:2px 8px" onclick="document.getElementById('event-flow-detail').style.display='none'">✕</button></h3>
+      <div class="detail-row"><span class="key">Transport</span><span class="val">${transportBadgeHtml(hopTransport(hop))}</span></div>
+      <div class="detail-row"><span class="key">Topic</span><span class="val">${esc(hop.topicShortId || '—')}</span></div>`;
+    return;
+  }
+
+  const p = payload.participant;
+  const roleLabel = payload.role === 'pub' ? 'Publisher' : 'Subscriber';
+  const hints = (p.consistencyHints || []).map(h =>
+    `<span class="hint-badge">${esc(h.pattern || h.scopeKind)}</span>`).join(' ');
+  let liveRow = '';
+  if (p.liveVerification) {
+    const lv = p.liveVerification;
+    liveRow = `<div class="detail-row"><span class="key">GCP live</span><span class="val">${esc(lv.status)}${lv.liveTopicShortId ? ' → ' + esc(lv.liveTopicShortId) : ''}</span></div>`;
+  }
+  panel.innerHTML = `<h3>${roleLabel}: ${esc(p.serviceName || p.serviceId)}
+    <button class="btn" style="float:right;font-size:11px;padding:2px 8px" onclick="document.getElementById('event-flow-detail').style.display='none'">✕</button></h3>
+    <div class="detail-row"><span class="key">Transport</span><span class="val">${transportBadgeHtml(p.transport || hopTransport({ transport: p.transport }))}</span></div>
+    <div class="detail-row"><span class="key">Resource</span><span class="val">${esc(p.shortId || payload.hopTopic)}</span></div>
+    <div class="detail-row"><span class="key">Handler</span><span class="val">${esc(p.linkedClassFqn || '—')}</span></div>
+    <div class="detail-row"><span class="key">Repo</span><span class="val">${esc(p.repo || '—')}</span></div>
+    <div class="detail-row"><span class="key">Evidence</span><span class="val">${esc(p.evidenceSource || '—')} (${p.confidence != null ? p.confidence : '?'})</span></div>
+    ${liveRow}
+    ${hints ? `<div style="margin-top:8px">${hints}</div>` : ''}
+    <div id="event-flow-facts-extra" style="margin-top:10px;font-size:12px;color:#8b949e">Loading schemas & gates…</div>
+    ${p.serviceId ? `<div style="margin-top:10px"><button class="btn" onclick="highlightInGraph('${esc(p.serviceId)}')">Show in Dependency Graph</button></div>` : ''}`;
+}
+
+async function loadEventFlowParticipantFacts(payload, panel) {
+  const extra = panel.querySelector('#event-flow-facts-extra');
+  if (!extra) return;
+  const p = payload.participant;
+  if (!p?.serviceId) {
+    extra.innerHTML = '';
+    return;
+  }
+  const hopTopic = payload.hopTopic || p.shortId;
+  const env = lastEventFlowReport?.envLane || 'pdn';
+  try {
+    const schemaParams = new URLSearchParams({ serviceId: p.serviceId, topicShortId: hopTopic || '' });
+    const gateParams = new URLSearchParams({ serviceId: p.serviceId, env });
+    const [schemaResp, gateResp] = await Promise.all([
+      api(`/v1/facts/message-schema?${schemaParams}`),
+      api(`/v1/facts/gates?${gateParams}`)
+    ]);
+    extra.innerHTML = renderEventFlowFactsExtra(schemaResp.data || [], gateResp.data || [], p.linkedClassFqn);
+  } catch (e) {
+    extra.innerHTML = `<span style="color:#f85149">Could not load schemas/gates: ${esc(e.message)}</span>`;
+  }
+}
+
+function qMsgTypeFromUnpack(unpackExpression) {
+  if (!unpackExpression) return null;
+  const m = String(unpackExpression).match(/QMsgEvent\.Type\.([A-Z_]+)/);
+  return m ? m[1] : null;
+}
+
+function parsePayloadFields(raw) {
+  if (raw == null || raw === '') return [];
+  if (Array.isArray(raw)) return raw;
+  try {
+    const parsed = JSON.parse(String(raw));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function renderProtoFieldsTable(fields, maxRows) {
+  const limit = maxRows != null ? maxRows : 24;
+  const rows = (fields || []).slice(0, limit);
+  if (!rows.length) return '';
+  let html = '<div class="proto-fields"><table><thead><tr><th>#</th><th>Field</th><th>Type</th></tr></thead><tbody>';
+  rows.forEach(f => {
+    const num = f.number != null ? f.number : '—';
+    const name = f.name || '—';
+    const repeated = f.repeated === true || f.repeated === 'true';
+    const typeLabel = repeated ? `repeated ${f.type || '?'}` : (f.type || '?');
+    html += `<tr><td class="field-num">${esc(String(num))}</td>`;
+    html += `<td class="field-name">${esc(name)}</td>`;
+    html += `<td class="field-type">${esc(typeLabel)}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  if (fields.length > limit) {
+    html += `<div class="proto-fields-more">+ ${fields.length - limit} more field${fields.length - limit !== 1 ? 's' : ''}</div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderEventFlowFactsExtra(schemas, gates, handlerFqn) {
+  let html = '';
+  const scopedSchemas = schemas.filter(s =>
+    !handlerFqn || !s.linkedClassFqn || s.linkedClassFqn === handlerFqn);
+  const schemaRows = (scopedSchemas.length ? scopedSchemas : schemas).slice(0, 6);
+  if (schemaRows.length) {
+    html += '<div style="margin-bottom:8px"><strong style="color:#e6edf3">Message schema</strong></div>';
+    schemaRows.forEach(s => {
+      const unpackType = qMsgTypeFromUnpack(s.unpackExpression);
+      html += `<div class="schema-row">${esc(s.direction || '?')} · ${esc(s.payloadProto || '—')}`;
+      if (s.unpackExpression) html += ` · unpack: ${esc(s.unpackExpression)}`;
+      html += '</div>';
+      if (unpackType) {
+        html += `<div class="gate-type-row">QMsgEvent.Type (unpack): ${esc(unpackType)}</div>`;
+      }
+      const fields = parsePayloadFields(s.payloadFields);
+      if (fields.length) {
+        html += renderProtoFieldsTable(fields);
+      }
+    });
+  } else {
+    html += '<div class="schema-row">No message schema facts for this topic/service.</div>';
+  }
+
+  const typeGates = gates.filter(g =>
+    g.gateKey === 'QMsgEvent.Type'
+    && (!handlerFqn || !g.guardedSymbolFqn || g.guardedSymbolFqn === handlerFqn));
+  if (typeGates.length) {
+    html += '<div style="margin:10px 0 6px"><strong style="color:#e6edf3">QMsgEvent.Type gates</strong></div>';
+    typeGates.forEach(g => {
+      html += `<div class="gate-type-row">⚑ ${esc(g.requiredValue || '?')} · ${esc(g.guardedFlowStep || g.gateKind || '')}`;
+      if (g.effectWhenFail) html += ` · on fail: ${esc(g.effectWhenFail)}`;
+      html += '</div>';
+    });
+  }
+  return html;
+}
+
+function renderEventFlowEntryAnchor(triggers) {
+  let html = '';
+  triggers.forEach(t => {
+    const pathLine = t.httpMethod
+      ? `${t.httpMethod} ${t.pathPattern || '?'}`
+      : (t.pathPattern || t.triggerId || '—');
+    const handlerShort = t.linkedHandlerFqn
+      ? handlerShortName(t.linkedHandlerFqn) + (t.linkedMethod ? '.' + t.linkedMethod + '()' : '')
+      : null;
+    html += `<div class="event-entry-anchor"><div class="entry-step-card">
+      <div class="step-num">Entry</div>
+      <span class="trigger-kind-badge">${esc(t.triggerKind || 'TRIGGER')}</span>
+      <div class="entry-path">${esc(pathLine)}</div>
+      ${handlerShort ? `<div class="entry-handler">${esc(handlerShort)}</div>` : ''}
+    </div></div>`;
+  });
+  return html;
+}
+
+function renderEventFlowContinuationCard(c) {
+  const label = c.cronJobName || c.bqTable || c.triggerKind || c.note || 'continuation';
+  const detail = [c.serviceId, c.schedule, c.partnerVariant].filter(Boolean).join(' · ');
+  return `<div class="continuation-card">
+    <div class="step-num">After terminal hop</div>
+    <div style="color:#d29922;font-weight:600;margin-bottom:4px">${esc(label)}</div>
+    ${detail ? `<div style="font-family:monospace;font-size:10px">${esc(detail)}</div>` : ''}
+    ${c.note ? `<div style="margin-top:4px;font-size:10px">${esc(c.note)}</div>` : ''}
+  </div>`;
+}
+
+function renderEventFlowMeta(report, hops) {
+  let html = `<div class="journey-meta">
+    <span class="title">Event flow: <code style="font-size:13px">${esc(report.startTopic)}</code></span>
+    <span class="sub">${esc(report.orgId)} · ${esc(report.envLane || 'pdn')} · ${hops.length} hop${hops.length !== 1 ? 's' : ''}</span>
+  </div>`;
+  if (lastEventFlowEnvelope && lastEventFlowEnvelope.livePubSubStatus && lastEventFlowEnvelope.livePubSubStatus !== 'DISABLED') {
+    html += `<div style="font-size:12px;color:#8b949e;margin-bottom:6px">Live GCP: <strong>${esc(lastEventFlowEnvelope.livePubSubStatus)}</strong>
+      (verified=${lastEventFlowEnvelope.livePubSubVerifiedCount ?? 0}, skipped=${lastEventFlowEnvelope.livePubSubSkippedCount ?? 0})</div>`;
+  }
+  html += `<div class="event-flow-legend">
+    <span>↑ pub</span><span>↓ sub</span><span>--- handoff</span><span>🔁 hint</span><span>⚠ gap</span>
+    <span><span class="live-dot ok"></span> GCP OK</span><span><span class="live-dot bad"></span> drift</span>
+  </div>`;
+  if ((report.missingBundleRepos || []).length) {
+    html += `<div style="margin-bottom:10px;font-size:11px;color:#8b949e">Not indexed: ${report.missingBundleRepos.map(r => `<code>${esc(r)}</code>`).join(', ')}</div>`;
+  }
+  html += renderEventFlowTraceMeta(report);
+  html += renderEventFlowHopSummaries(report);
+  html += renderEventFlowNarrative(report);
+  return html;
+}
+
+function renderEventFlowFooter(report, hops, hopScopedGapKeys) {
+  let html = '';
+  if ((report.externalEndpoints || []).length) {
+    html += `<div style="margin-top:10px;font-size:12px;color:#8b949e">
+      External calls: ${report.externalEndpoints.map(e =>
+        `<span class="impact-tag">${esc(e.httpMethod || '')} ${esc(e.urlTemplate || e.partnerSlug || e.endpointId)}</span>`
+      ).join(' ')}</div>`;
+  }
+  const reportGaps = (report.gaps || []).filter(g => !hopScopedGapKeys.has(g.gapType + ':' + (g.description || '')));
+  if (reportGaps.length) {
+    html += `<div class="gap-list">${reportGaps.map(g =>
+      `<span class="gap-badge" title="${esc(gapBadgeTitle(g))}">⚠ ${esc(g.gapType)}</span>`).join('')}</div>`;
+  }
+  if ((report.consistencyHints || []).length) {
+    html += `<div class="gap-list" style="margin-top:6px">${report.consistencyHints.map(h =>
+      `<span class="hint-badge">🔁 ${esc(h.pattern || h.scopeKind || 'consistency')}</span>`).join('')}</div>`;
+  }
+  return html;
+}
+
+function eventFlowHasParticipants(hops) {
+  return hops.some(h => (h.publishers || []).length || (h.subscribers || []).length);
+}
+
+function buildEventFlowGraphModel(report) {
+  const nodes = [];
+  const edges = [];
+  const hops = report.hops || [];
+  const entryTriggers = collectFirstHopInboundTriggers(hops);
+
+  // One collapsed entry node (avoids N×M entry edge spaghetti)
+  if (entryTriggers.length && hops.length) {
+    const entryId = 'entry:anchor';
+    const entryLabel = entryTriggers.length === 1
+      ? (entryTriggers[0].triggerKind || 'ENTRY')
+      : `Entry (${entryTriggers.length})`;
+    nodes.push({ id: entryId, type: 'entry', label: entryLabel,
+      payload: { role: 'entry', triggers: entryTriggers } });
+    eventFlowNodePayloads[entryId] = { role: 'entry', triggers: entryTriggers };
+
+    const order1 = hops[0].order != null ? hops[0].order : 1;
+    (hops[0].subscribers || []).forEach((p, si) => {
+      if ((p.inboundTriggers || []).length) {
+        edges.push({
+          kind: 'entry',
+          source: entryId,
+          target: participantNodeId('sub', order1, p.serviceId, si),
+        });
+      }
+    });
+  }
+
+  hops.forEach((hop, hi) => {
+    const order = hop.order != null ? hop.order : hi + 1;
+    const topicId = `topic:${order}:${hop.topicShortId}`;
+    nodes.push({ id: topicId, type: 'topic', label: hop.topicShortId, hopOrder: order, payload: { role: 'topic', hop } });
+    eventFlowNodePayloads[topicId] = { role: 'topic', hop };
+
+    (hop.publishers || []).forEach((p, pi) => {
+      const id = participantNodeId('pub', order, p.serviceId, pi);
+      nodes.push({ id, type: 'publisher', label: p.serviceName || p.serviceId, serviceId: p.serviceId, hopOrder: order,
+        payload: { role: 'pub', participant: p, hopTopic: hop.topicShortId } });
+      edges.push({ kind: 'publish', source: id, target: topicId });
+      eventFlowNodePayloads[id] = { role: 'pub', participant: p, hopTopic: hop.topicShortId };
+    });
+
+    (hop.subscribers || []).forEach((p, si) => {
+      const id = participantNodeId('sub', order, p.serviceId, si);
+      nodes.push({ id, type: 'subscriber', label: p.serviceName || p.serviceId, serviceId: p.serviceId, hopOrder: order,
+        payload: { role: 'sub', participant: p, hopTopic: hop.topicShortId } });
+      edges.push({ kind: 'subscribe', source: topicId, target: id });
+      eventFlowNodePayloads[id] = { role: 'sub', participant: p, hopTopic: hop.topicShortId };
+    });
+
+    (hop.terminalContinuations || []).forEach((c, ci) => {
+      const id = `term:${order}:${ci}`;
+      nodes.push({ id, type: 'terminal', label: c.cronJobName || c.triggerKind || 'terminal', hopOrder: order,
+        payload: { role: 'terminal', continuation: c } });
+      eventFlowNodePayloads[id] = { role: 'terminal', continuation: c };
+      const candidates = (hop.subscribers || []).filter(p => !c.serviceId || p.serviceId === c.serviceId);
+      const linkFrom = (candidates.length ? candidates : (hop.subscribers || []).slice(0, 1))[0];
+      if (linkFrom) {
+        const si = (hop.subscribers || []).indexOf(linkFrom);
+        edges.push({ kind: 'terminal', source: participantNodeId('sub', order, linkFrom.serviceId, si), target: id });
+      }
+    });
+  });
+
+  for (let i = 0; i < hops.length - 1; i++) {
+    const subs = hops[i].subscribers || [];
+    const pubs = hops[i + 1].publishers || [];
+    const oN = hops[i].order != null ? hops[i].order : i + 1;
+    const oN1 = hops[i + 1].order != null ? hops[i + 1].order : i + 2;
+    subs.forEach((s, si) => {
+      pubs.forEach((p, pi) => {
+        if (s.serviceId === p.serviceId) {
+          edges.push({
+            kind: 'handoff',
+            source: participantNodeId('sub', oN, s.serviceId, si),
+            target: participantNodeId('pub', oN1, p.serviceId, pi),
+          });
+        }
+      });
+    });
+  }
+
+  const tracePathNodeIds = computePrimaryTracePath(hops, edges);
+
+  return { nodes, edges, tracePathNodeIds };
+}
+
+/** Single BFS chain: one pub/sub handoff per hop (not all fan-out participants). */
+function computePrimaryTracePath(hops, edges) {
+  const path = new Set();
+  if (!hops.length) return [];
+
+  const handoffs = edges.filter(e => e.kind === 'handoff');
+  let carrySubId = null;
+
+  for (let i = 0; i < hops.length; i++) {
+    const order = hops[i].order != null ? hops[i].order : i + 1;
+    const topicId = `topic:${order}:${hops[i].topicShortId}`;
+    path.add(topicId);
+
+    if (carrySubId) {
+      const ho = handoffs.find(e => e.source === carrySubId && e.target.startsWith(`pub:${order}:`));
+      if (ho) {
+        path.add(ho.source);
+        path.add(ho.target);
+      }
+      carrySubId = null;
+    } else if (i === 0) {
+      const pub = edges.find(e => e.kind === 'publish' && e.target === topicId);
+      if (pub) path.add(pub.source);
+    }
+
+    const subs = edges.filter(e => e.kind === 'subscribe' && e.source === topicId);
+    let chosenSub = null;
+    if (i < hops.length - 1 && handoffs.length) {
+      const nextOrder = hops[i + 1].order != null ? hops[i + 1].order : i + 2;
+      chosenSub = subs.find(s =>
+        handoffs.some(h => h.source === s.target && h.target.startsWith(`pub:${nextOrder}:`))
+      ) || subs[0];
+    } else {
+      chosenSub = subs[0];
+    }
+    if (chosenSub) {
+      path.add(chosenSub.target);
+      carrySubId = chosenSub.target;
+    }
+  }
+
+  return [...path];
+}
+
+function layoutEventFlowGraph(model, width, height) {
+  const COL_W = 240;
+  const ROW_H = 56;
+  const topics = model.nodes.filter(n => n.type === 'topic').sort((a, b) => a.hopOrder - b.hopOrder);
+
+  let maxSubs = 1;
+  let maxPubs = 1;
+  topics.forEach(t => {
+    const o = t.hopOrder;
+    maxPubs = Math.max(maxPubs, model.nodes.filter(n => n.type === 'publisher' && n.hopOrder === o).length);
+    maxSubs = Math.max(maxSubs, model.nodes.filter(n => n.type === 'subscriber' && n.hopOrder === o).length);
+  });
+
+  const TOPIC_Y = 50 + maxPubs * ROW_H + 40;
+  const PUB_BASE = 50;
+  const SUB_BASE = TOPIC_Y + 50;
+  const graphHeight = SUB_BASE + maxSubs * ROW_H + 60;
+
+  const entry = model.nodes.find(n => n.type === 'entry');
+  topics.forEach((topic, hi) => {
+    const x = 90 + hi * COL_W;
+    const order = topic.hopOrder;
+    topic.x = x;
+    topic.y = TOPIC_Y;
+    model.nodes.filter(n => n.type === 'publisher' && n.hopOrder === order)
+      .forEach((n, i) => { n.x = x; n.y = PUB_BASE + i * ROW_H; });
+    model.nodes.filter(n => n.type === 'subscriber' && n.hopOrder === order)
+      .forEach((n, i) => { n.x = x; n.y = SUB_BASE + i * ROW_H; });
+  });
+
+  if (entry && topics.length) {
+    entry.x = topics[0].x;
+    entry.y = 24;
+  }
+
+  const terminals = model.nodes.filter(n => n.type === 'terminal');
+  if (terminals.length && topics.length) {
+    const lastX = topics[topics.length - 1].x;
+    terminals.forEach((n, i) => {
+      n.x = lastX + COL_W * 0.55;
+      n.y = SUB_BASE + i * ROW_H;
+    });
+  }
+
+  model.width = Math.max(width, 90 + topics.length * COL_W + (terminals.length ? COL_W : 80));
+  model.height = Math.max(height, graphHeight);
+  return model;
+}
+
+function renderEventFlowGraphShell(report) {
+  const hops = report.hops || [];
+  let html = renderEventFlowMeta(report, hops);
+  html += `<div class="event-flow-graph-wrap">
+    <svg id="event-flow-graph-svg"><defs>
+      <marker id="ef-arrow" viewBox="0 -4 10 8" refX="14" refY="0" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0,-4L10,0L0,4" fill="#484f58"/>
+      </marker>
+    </defs></svg>
+    <div class="event-flow-graph-controls">
+      <button type="button" class="btn" onclick="eventFlowGraphZoomBy(1.25)">＋</button>
+      <button type="button" class="btn" onclick="eventFlowGraphZoomBy(0.8)">－</button>
+      <button type="button" class="btn" onclick="eventFlowGraphResetZoom()">⌂</button>
+    </div>
+  </div>
+  <div id="event-flow-detail" class="detail-panel" style="display:none;margin-top:12px"></div>`;
+  html += renderEventFlowFooter(report, hops, new Set());
+  return html;
+}
+
+function mountEventFlowGraph(report) {
+  const svgEl = document.getElementById('event-flow-graph-svg');
+  if (!svgEl || typeof d3 === 'undefined') return;
+
+  const model = layoutEventFlowGraph(buildEventFlowGraphModel(report), svgEl.clientWidth || 900, 460);
+  const focusId = getEventFlowFocusId();
+  const highlight = eventFlowHighlightPath;
+  const traceSet = new Set(model.tracePathNodeIds);
+
+  const svg = d3.select('#event-flow-graph-svg');
+  svg.attr('viewBox', `0 0 ${model.width} ${model.height}`);
+  svg.selectAll('g.ef-root').remove();
+  const g = svg.append('g').attr('class', 'ef-root');
+
+  eventFlowGraphZoom = d3.zoom().scaleExtent([0.15, 3]).on('zoom', e => g.attr('transform', e.transform));
+  svg.call(eventFlowGraphZoom);
+  eventFlowGraphSvg = svg;
+
+  const nodeById = Object.fromEntries(model.nodes.map(n => [n.id, n]));
+
+  function linkPath(d) {
+    const s = nodeById[d.source] || d.source;
+    const t = nodeById[d.target] || d.target;
+    if (!s || !t || s.x == null || t.x == null) return '';
+    if (d.kind === 'handoff') {
+      const midX = s.x + Math.max(40, (t.x - s.x) * 0.5);
+      return `M${s.x},${s.y} L${midX},${s.y} L${midX},${t.y} L${t.x},${t.y}`;
+    }
+    if (d.kind === 'entry') {
+      const midY = (s.y + t.y) / 2;
+      return `M${s.x},${s.y} L${s.x},${midY} L${t.x},${midY} L${t.x},${t.y}`;
+    }
+    if (Math.abs(s.x - t.x) < 8) {
+      return `M${s.x},${s.y} L${t.x},${t.y}`;
+    }
+    const mx = (s.x + t.x) / 2;
+    return `M${s.x},${s.y} C${mx},${s.y} ${mx},${t.y} ${t.x},${t.y}`;
+  }
+
+  function edgeDimmed(d) {
+    if (focusId) {
+      const s = nodeById[d.source];
+      const t = nodeById[d.target];
+      const sOk = !s || s.type === 'topic' || s.serviceId === focusId || s.type === 'entry';
+      const tOk = !t || t.type === 'topic' || t.serviceId === focusId || t.type === 'terminal';
+      if (!sOk && !tOk) return true;
+    }
+    if (highlight && d.kind !== 'handoff' && !traceSet.has(d.source) && !traceSet.has(d.target)) return true;
+    if (highlight && d.kind === 'handoff') {
+      return !traceSet.has(d.source) && !traceSet.has(d.target);
+    }
+    return false;
+  }
+
+  function nodeDimmed(n) {
+    if (focusId && n.serviceId && n.serviceId !== focusId) return true;
+    if (focusId && n.type === 'topic') {
+      const hop = n.payload?.hop;
+      return hop && !hopTouchesFocus(hop, focusId);
+    }
+    if (highlight && n.type !== 'entry' && n.type !== 'terminal' && !traceSet.has(n.id)) return true;
+    return false;
+  }
+
+  const visibleEdges = model.edges.filter(e => !edgeDimmed(e));
+
+  g.append('g').selectAll('path')
+    .data(visibleEdges).join('path')
+    .attr('class', d => `ef-link ${d.kind}`)
+    .attr('d', linkPath)
+    .attr('marker-end', 'url(#ef-arrow)');
+
+  const nodeG = g.append('g').selectAll('g')
+    .data(model.nodes).join('g')
+    .attr('class', d => `ef-node${nodeDimmed(d) ? ' dimmed' : ''}`)
+    .attr('transform', d => `translate(${d.x},${d.y})`)
+    .on('click', (e, d) => { e.stopPropagation(); showEventFlowDetail(d.id); });
+
+  nodeG.each(function(d) {
+    const sel = d3.select(this);
+    if (d.type === 'topic') {
+      const transport = hopTransport(d.payload?.hop);
+      sel.append('rect').attr('x', -55).attr('y', -18).attr('width', 110).attr('height', 36)
+        .attr('rx', 6).attr('fill', '#1f3a5f').attr('stroke', transport === 'KAFKA' ? '#d29922' : '#1f6feb');
+      sel.append('text').attr('class', 'ef-topic-label').attr('text-anchor', 'middle').attr('dy', -4)
+        .attr('fill', transport === 'KAFKA' ? '#d29922' : '#58a6ff').text(transport);
+      sel.append('text').attr('class', 'ef-topic-label').attr('text-anchor', 'middle').attr('dy', 10)
+        .text(d.label.length > 16 ? d.label.slice(0, 14) + '…' : d.label);
+    } else if (d.type === 'entry') {
+      sel.append('rect').attr('x', -42).attr('y', -12).attr('width', 84).attr('height', 24)
+        .attr('rx', 4).attr('fill', '#1c2128').attr('stroke', '#58a6ff').attr('stroke-dasharray', '3 2');
+      sel.append('text').attr('class', 'ef-node-label').attr('text-anchor', 'middle').attr('dy', 4)
+        .text((d.label || '').slice(0, 14));
+    } else if (d.type === 'terminal') {
+      sel.append('rect').attr('x', -40).attr('y', -12).attr('width', 80).attr('height', 24)
+        .attr('rx', 4).attr('fill', 'none').attr('stroke', '#484f58').attr('stroke-dasharray', '4 3');
+      sel.append('text').attr('class', 'ef-node-label').attr('text-anchor', 'middle').attr('dy', 4)
+        .text((d.label || '').slice(0, 12));
+    } else {
+      const fill = d.type === 'publisher' ? '#28312a' : d.type === 'subscriber' ? '#212830' : '#1c2128';
+      const stroke = d.type === 'publisher' ? '#2ea043' : d.type === 'subscriber' ? '#388bfd' : '#484f58';
+      sel.append('circle').attr('r', 14).attr('fill', fill).attr('stroke', stroke);
+      if (d.type === 'subscriber' && d.payload?.participant?.liveVerification) {
+        const st = d.payload.participant.liveVerification.status;
+        if (st && st !== 'OK' && st !== 'SKIPPED' && st !== 'DISABLED') {
+          sel.append('circle').attr('r', 17).attr('fill', 'none').attr('stroke', '#f85149').attr('stroke-width', 2);
+        } else if (st === 'OK') {
+          sel.append('circle').attr('r', 17).attr('fill', 'none').attr('stroke', '#3fb950').attr('stroke-width', 1.5);
+        }
+      }
+      sel.append('text').attr('class', 'ef-node-label').attr('text-anchor', 'middle').attr('dy', 28)
+        .text((d.label || '').length > 14 ? d.label.slice(0, 12) + '…' : d.label);
+    }
+  });
+
+  eventFlowGraphFitView(model);
+}
+
+function eventFlowGraphFitView(model) {
+  if (!eventFlowGraphSvg || !eventFlowGraphZoom || !model) return;
+  const svgEl = document.getElementById('event-flow-graph-svg');
+  if (!svgEl) return;
+  const vw = svgEl.clientWidth || 900;
+  const vh = svgEl.clientHeight || 460;
+  const scale = Math.min(vw / model.width, vh / model.height, 1) * 0.92;
+  const tx = (vw - model.width * scale) / 2;
+  const ty = (vh - model.height * scale) / 2;
+  eventFlowGraphSvg.transition().duration(400).call(
+    eventFlowGraphZoom.transform,
+    d3.zoomIdentity.translate(tx, ty).scale(scale)
+  );
+}
+
+function eventFlowGraphZoomBy(f) {
+  if (eventFlowGraphSvg && eventFlowGraphZoom) {
+    eventFlowGraphSvg.transition().duration(200).call(eventFlowGraphZoom.scaleBy, f);
+  }
+}
+
+function eventFlowGraphResetZoom() {
+  if (eventFlowGraphSvg && eventFlowGraphZoom) {
+    eventFlowGraphSvg.transition().duration(300).call(eventFlowGraphZoom.transform, d3.zoomIdentity);
+  }
+}
+
+function renderEventFlowPipeline(report) {
+  const hops = report.hops || [];
+  if (!hops.length || !eventFlowHasParticipants(hops)) {
+    return '<div class="loading">No services in this event flow.</div>';
+  }
+
+  const hopScopedGapKeys = new Set();
+  const focusId = getEventFlowFocusId();
+  let html = renderEventFlowMeta(report, hops);
+  html += '<div id="event-flow-detail" class="detail-panel" style="display:none;margin-bottom:12px"></div>';
+  html += '<div class="entry-pipeline">';
+
+  const entryTriggers = collectFirstHopInboundTriggers(hops);
+  if (entryTriggers.length) {
+    html += renderEventFlowEntryAnchor(entryTriggers);
+    html += '<div class="step-arrow">→</div>';
+  }
+
+  hops.forEach((hop, i) => {
+    if (i > 0) html += '<div class="step-arrow">→</div>';
+    const hopGaps = gapsForHop(report.gaps, hop);
+    hopGaps.forEach(g => hopScopedGapKeys.add(g.gapType + ':' + (g.description || '')));
+    const hopNum = hop.order != null ? hop.order : i + 1;
+    const hopDim = focusId && !hopTouchesFocus(hop, focusId) ? ' event-dimmed-hop' : '';
+    html += `<div class="event-hop-card${hopDim}">
+      <div class="step-num">Hop ${hopNum}</div>
+      <div class="hop-topic">${transportBadgeHtml(hopTransport(hop))}${esc(hop.topicShortId)}</div>`;
+    if (hopGaps.length) {
+      html += `<div class="event-hop-gaps">${hopGaps.map(g =>
+        `<span class="gap-badge" title="${esc(gapBadgeTitle(g))}">⚠ ${esc(g.gapType)}</span>`).join('')}</div>`;
+    }
+    (hop.publishers || []).forEach((p, pi) => {
+      html += renderEventFlowParticipant(p, 'pub', hop.topicShortId, participantNodeId('pub', hopNum, p.serviceId, pi), focusId);
+    });
+    (hop.subscribers || []).forEach((p, si) => {
+      html += renderEventFlowParticipant(p, 'sub', hop.topicShortId, participantNodeId('sub', hopNum, p.serviceId, si), focusId);
+    });
+    html += '</div>';
+  });
+
+  const continuations = hops.flatMap(h => h.terminalContinuations || []);
+  if (continuations.length) {
+    html += '<div class="step-arrow" style="opacity:0.5">⇢</div>';
+    continuations.forEach(c => { html += renderEventFlowContinuationCard(c); });
+  }
+
+  html += '</div>';
+  html += renderEventFlowFooter(report, hops, hopScopedGapKeys);
+  return html;
+}
+
+// ── Event flow renderer ────────────────────────────────────────────────────────
+function renderEventFlow(report, viewMode) {
+  const mode = viewMode || eventFlowViewMode || 'pipeline';
+  if (mode === 'matrix') return renderEventFlowMatrix(report);
+  if (mode === 'graph') return renderEventFlowGraphShell(report);
+  return renderEventFlowPipeline(report);
+}
+
+function renderEventFlowMatrix(report) {
+  const hops = report.hops || [];
+
+  // Collect all unique services, preserving first-appearance order
+  const svcOrder = [];
+  const svcMeta  = new Map(); // serviceId → { name, repo }
+  hops.forEach(hop => {
+    [...(hop.publishers || []), ...(hop.subscribers || [])].forEach(p => {
+      if (!svcMeta.has(p.serviceId)) {
+        svcOrder.push(p.serviceId);
+        svcMeta.set(p.serviceId, { name: p.serviceName || p.repo || p.serviceId, repo: p.repo });
+      }
+    });
+  });
+
+  if (!svcOrder.length) return '<div class="loading">No services in this event flow.</div>';
+
+  const focusId = getEventFlowFocusId();
+  const LABEL_W = 190;
+  const HOP_W   = 155;
+  const ARROW_W = 36;
+
+  let html = renderEventFlowMeta(report, hops);
+  html += `<div class="swimlane-wrap">
+  <table class="swimlane-table">
+  <colgroup>
+    <col style="width:${LABEL_W}px">
+    ${hops.map((_,i) => `${i > 0 ? `<col style="width:${ARROW_W}px">` : ''}<col style="width:${HOP_W}px">`).join('')}
+  </colgroup>
+  <thead><tr>
+    <th style="padding:4px 8px;text-align:left;font-size:11px;color:#8b949e;font-weight:500">Service</th>`;
+
+  hops.forEach((hop, i) => {
+    if (i > 0) html += `<th class="hop-arrow-cell">→</th>`;
+    html += `<th style="padding:4px;text-align:center"><div class="topic-bubble">${transportBadgeHtml(hopTransport(hop))}${esc(hop.topicShortId)}</div></th>`;
+  });
+  html += `</tr></thead><tbody>`;
+
+  // One row per service
+  svcOrder.forEach(svcId => {
+    const meta = svcMeta.get(svcId);
+    const rowDim = focusId && svcId !== focusId ? ' style="opacity:0.25"' : '';
+    const dot  = `<div style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:${nodeColor(freshness(svcId))}"></div>`;
+    html += `<tr${rowDim}>
+      <td style="padding:3px 8px 3px 3px">
+        <div class="lane-label" title="${esc(svcId)}">${dot}${esc(meta.name)}</div>
+      </td>`;
+
+    hops.forEach((hop, i) => {
+      if (i > 0) html += `<td class="hop-arrow-cell" style="vertical-align:middle"></td>`;
+      const pubs = (hop.publishers  || []).filter(p => p.serviceId === svcId);
+      const subs = (hop.subscribers || []).filter(p => p.serviceId === svcId);
+      const colDim = focusId && !hopTouchesFocus(hop, focusId) ? ' style="opacity:0.2"' : '';
+      const cellHtml = renderMatrixCell(pubs, subs, hop.topicShortId, focusId);
+      html += `<td class="matrix-cell"${colDim}>${cellHtml}</td>`;
+    });
+    html += `</tr>`;
+  });
+
+  // External endpoints footer row (if any)
+  if ((report.externalEndpoints || []).length) {
+    html += `<tr><td style="padding:3px 8px 3px 3px">
+      <div class="lane-label" style="color:#8b949e;font-weight:400">🌐 External</div></td>`;
+    hops.forEach((_, i) => {
+      if (i > 0) html += `<td></td>`;
+      html += `<td style="padding:3px"><div class="lane-cell empty"></div></td>`;
+    });
+    html += `</tr>`;
+  }
+
+  html += `</tbody></table></div>`;
+  html += renderEventFlowFooter(report, hops, new Set());
+  return html;
+}
+
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Expose journey functions globally (guards against async-function hoisting edge cases) ──
+window.setJourneyMode = setJourneyMode;
+window.setEventFlowView = setEventFlowView;
+window.runJourney     = runJourney;
+window.loadJourneyTopics = loadJourneyTopics;
+window.onJourneyTopicChange = onJourneyTopicChange;
+window.showEventFlowDetail = showEventFlowDetail;
+window.eventFlowGraphZoomBy = eventFlowGraphZoomBy;
+window.eventFlowGraphResetZoom = eventFlowGraphResetZoom;
+window.onEventFlowFocusChange = onEventFlowFocusChange;
+window.onEventFlowLiveVerifyChange = onEventFlowLiveVerifyChange;
+window.onEventFlowHighlightChange = onEventFlowHighlightChange;
+window.buildEventFlowGraphModel = buildEventFlowGraphModel;
+window.computePrimaryTracePath = computePrimaryTracePath;
+window.renderMatrixCell = renderMatrixCell;
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadAll();
+</script>
+</body>
+</html>

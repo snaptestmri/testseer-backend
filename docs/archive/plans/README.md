@@ -31,7 +31,10 @@ For how the system works today, use:
 | [2026-06-05-p14-mcp-server.md](2026-06-05-p14-mcp-server.md) | MCP server |
 | [2026-06-05-p14-pr-comment-bot.md](2026-06-05-p14-pr-comment-bot.md) | PR comment bot (planned) |
 | [2026-06-05-p15-intellij-impact-consumer.md](2026-06-05-p15-intellij-impact-consumer.md) | IntelliJ impact consumer (planned) |
+| [2026-06-12-p16-rest-api-hardening.md](2026-06-12-p16-rest-api-hardening.md) | REST API conventions, ApiError, OpenAPI sync (**R1–R3 implemented; R4 planned**) |
 
 Many plans include a **Status: Implemented** header at the top; treat the backend README and OpenAPI spec as authoritative when they diverge.
 
-**P12 gap detection:** plan only — `GET /v1/gaps` **not implemented**; MCP `testseer_get_gaps` is blocked until P12 ships.
+**P16 REST hardening:** design in [TestSeer_REST_API_Design.md](../../TestSeer_REST_API_Design.md); phases R1 (OpenAPI) → R4 (header `X-TestSeer-Api-Version`).
+
+**P12 gap detection:** **Shipped** (BL-020/021) — `GET /v1/gaps` + MCP `testseer_get_gaps`. Historical plan: [2026-06-05-p12-gap-detection.md](2026-06-05-p12-gap-detection.md).

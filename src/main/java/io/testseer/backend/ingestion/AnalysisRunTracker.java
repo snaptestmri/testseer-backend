@@ -6,6 +6,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 
+import java.sql.Timestamp;
+
 @Component
 public class AnalysisRunTracker {
 
@@ -30,7 +32,7 @@ public class AnalysisRunTracker {
                 .param("commitSha",   job.commitSha())
                 .param("jobType",     job.jobType())
                 .param("attempt",     job.attempt())
-                .param("enqueuedAt",  job.enqueuedAt())
+                .param("enqueuedAt",  Timestamp.from(job.enqueuedAt()))
                 .update();
     }
 
@@ -53,6 +55,29 @@ public class AnalysisRunTracker {
                 WHERE job_id = :id
                 """)
                 .param("id",     jobId)
+                .param("detail", errorDetail)
+                .update();
+    }
+
+    public void updateAttempt(String jobId, int attempt) {
+        db.sql("""
+                UPDATE analysis_runs
+                SET attempt = :attempt, status = 'QUEUED', enqueued_at = now(),
+                    started_at = NULL, completed_at = NULL, error_detail = NULL
+                WHERE job_id = :id
+                """)
+                .param("id", jobId)
+                .param("attempt", attempt)
+                .update();
+    }
+
+    public void markDlq(String jobId, String errorDetail) {
+        db.sql("""
+                UPDATE analysis_runs
+                SET status = 'DLQ', completed_at = now(), error_detail = :detail
+                WHERE job_id = :id
+                """)
+                .param("id", jobId)
                 .param("detail", errorDetail)
                 .update();
     }

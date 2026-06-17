@@ -20,32 +20,61 @@ public class IndexCompleteNotifier {
     private final Optional<PubSubTemplate> pubSub;
     private final CacheService cacheService;
     private final ObjectMapper mapper;
+    private final IndexNotificationHub notificationHub;
     private final boolean pubSubEnabled;
+    private final boolean enrichCommitSha;
 
     public IndexCompleteNotifier(@Autowired(required = false) PubSubTemplate pubSubTemplate,
-                               CacheService cacheService,
-                               ObjectMapper mapper,
-                               @Value("${testseer.pubsub.enabled:false}") boolean pubSubEnabled) {
-        this.pubSub         = Optional.ofNullable(pubSubTemplate);
-        this.cacheService   = cacheService;
-        this.mapper         = mapper;
-        this.pubSubEnabled  = pubSubEnabled;
+                                 CacheService cacheService,
+                                 ObjectMapper mapper,
+                                 IndexNotificationHub notificationHub,
+                                 @Value("${testseer.pubsub.enabled:false}") boolean pubSubEnabled,
+                                 @Value("${testseer.notifications.enrich-commit-sha:true}") boolean enrichCommitSha) {
+        this.pubSub              = Optional.ofNullable(pubSubTemplate);
+        this.cacheService        = cacheService;
+        this.mapper              = mapper;
+        this.notificationHub     = notificationHub;
+        this.pubSubEnabled       = pubSubEnabled;
+        this.enrichCommitSha     = enrichCommitSha;
     }
 
     public void notifyComplete(String orgId, String repo, String serviceId) {
-        cacheService.invalidate(orgId, repo, serviceId);
+        notifyComplete(orgId, repo, serviceId, null, null);
+    }
 
-        if (pubSubEnabled && pubSub.isPresent()) {
-            try {
-                ObjectNode payload = mapper.createObjectNode();
-                payload.put("orgId", orgId);
-                payload.put("repo", repo);
-                payload.put("serviceId", serviceId);
-                pubSub.get().publish(TOPIC, mapper.writeValueAsBytes(payload));
-                log.debug("Published index-complete for {}/{}/{}", orgId, repo, serviceId);
-            } catch (Exception ex) {
-                log.warn("Failed to publish index-complete event: {}", ex.getMessage());
+    public void notifyComplete(String orgId, String repo, String serviceId, String commitSha, String jobId) {
+        cacheService.invalidate(orgId, repo, serviceId);
+        IndexCompleteEvent event = IndexCompleteEvent.complete(orgId, repo, serviceId, commitSha, jobId);
+        notificationHub.publish(event);
+        publishPubSub(event);
+    }
+
+    public void notifyCleared(String orgId, String repo, String serviceId) {
+        cacheService.invalidate(orgId, repo, serviceId);
+        IndexCompleteEvent event = IndexCompleteEvent.cleared(orgId, repo, serviceId);
+        notificationHub.publish(event);
+        publishPubSub(event);
+    }
+
+    private void publishPubSub(IndexCompleteEvent event) {
+        if (!pubSubEnabled || pubSub.isEmpty()) return;
+        try {
+            ObjectNode payload = mapper.createObjectNode();
+            payload.put("eventType", event.eventType());
+            payload.put("orgId", event.orgId());
+            payload.put("repo", event.repo());
+            payload.put("serviceId", event.serviceId());
+            if (enrichCommitSha && event.commitSha() != null) {
+                payload.put("commitSha", event.commitSha());
             }
+            if (event.jobId() != null) payload.put("jobId", event.jobId());
+            payload.put("indexedAt", event.indexedAt().toString());
+            payload.put("scope", event.scope());
+            pubSub.get().publish(TOPIC, mapper.writeValueAsBytes(payload));
+            log.debug("Published index event {} for {}/{}/{}",
+                    event.eventType(), event.orgId(), event.repo(), event.serviceId());
+        } catch (Exception ex) {
+            log.warn("Failed to publish index-complete event: {}", ex.getMessage());
         }
     }
 }

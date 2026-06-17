@@ -35,12 +35,12 @@ class ImpactAnalysisControllerTest {
                 .thenReturn(java.util.Optional.of(new CommitIndexValidator.RunMeta(null, "abc123")));
         when(cacheService.get(anyString(), anyString(), anyString(), anyString(), anyString(),
                 any(), eq(ImpactReport.class))).thenReturn(
-                new ImpactReport("svc-001", "abc123",
+                ImpactReport.withoutArtifactImpact("svc-001", "abc123",
                         List.of(new ImpactReport.ChangedSymbol(
                                 "io.orders.OrderController", "CLASS",
                                 "src/main/java/io/orders/OrderController.java",
                                 null, null)),
-                        List.of(), List.of(),
+                        List.of(), List.of(), List.of(),
                         List.of(new ImpactReport.SuggestedTest(
                                 "UNIT", "io.orders.OrderControllerTest",
                                 null, true, "Tests changed class OrderController")),

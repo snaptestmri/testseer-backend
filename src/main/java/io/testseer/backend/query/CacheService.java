@@ -1,6 +1,7 @@
 package io.testseer.backend.query;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.testseer.backend.observability.TestSeerMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,11 +20,14 @@ public class CacheService {
     private final StringRedisTemplate redis;
     private final ObjectMapper mapper;
     private final Duration ttl;
+    private final TestSeerMetrics metrics;
 
     public CacheService(StringRedisTemplate redis, ObjectMapper mapper,
+                        TestSeerMetrics metrics,
                         @Value("${testseer.cache.ttl-seconds:3600}") int ttlSeconds) {
         this.redis  = redis;
         this.mapper = mapper;
+        this.metrics = metrics;
         this.ttl    = Duration.ofSeconds(ttlSeconds);
     }
 
@@ -33,11 +37,15 @@ public class CacheService {
         String key = key(orgId, repo, serviceId, queryType, paramsHash);
         try {
             String cached = redis.opsForValue().get(key);
-            if (cached != null) return mapper.readValue(cached, type);
+            if (cached != null) {
+                metrics.recordCacheHit();
+                return mapper.readValue(cached, type);
+            }
         } catch (Exception ex) {
             log.warn("Redis read failed for key {}: {}", key, ex.getMessage());
         }
 
+        metrics.recordCacheMiss();
         T value = loader.get();
 
         try {

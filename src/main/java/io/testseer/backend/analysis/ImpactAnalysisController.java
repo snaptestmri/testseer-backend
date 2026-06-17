@@ -2,8 +2,6 @@ package io.testseer.backend.analysis;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.media.Content;
-import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -48,8 +46,8 @@ public class ImpactAnalysisController {
             which upstream services are affected, downstream dependencies, and suggested test scope. \
             Returns 404 if the service or commit has never been indexed.""")
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Impact report generated",
-            content = @Content(schema = @Schema(implementation = ImpactReport.class))),
+        @ApiResponse(responseCode = "200", description = "Impact report generated"),
+        @ApiResponse(responseCode = "202", description = "Indexing in progress — report may be stale"),
         @ApiResponse(responseCode = "404", description = "Service or commit not indexed"),
         @ApiResponse(responseCode = "400", description = "Required parameter missing")
     })

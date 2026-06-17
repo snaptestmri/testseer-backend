@@ -11,6 +11,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 @Tag(name = "Query — Facts", description = "Retrieve indexed facts about classes and outbound HTTP calls")
@@ -120,6 +121,106 @@ public class FactQueryController {
             Instant indexedAt
     ) {}
 
+    public record ExternalEndpointFactView(
+            String endpointId,
+            String partnerSlug,
+            String operation,
+            String httpMethod,
+            String urlTemplate,
+            String urlResolved,
+            String envLane,
+            String boundary,
+            String configKey,
+            String callerClassFqn,
+            String clientClassFqn,
+            String flowStep,
+            String authScheme,
+            String evidenceSource,
+            double confidence,
+            Instant indexedAt
+    ) {}
+
+    @Operation(summary = "Get external/partner HTTP endpoint facts for a service",
+               description = """
+                   Returns config-resolved external and internal partner HTTP targets \
+                   (e.g. Hyvee LMS notify URL, OIS partnerpublishingdetails). \
+                   Filter by env lane, partner slug, or flow step.""")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "External endpoint facts returned"),
+        @ApiResponse(responseCode = "202", description = "Indexing in progress"),
+        @ApiResponse(responseCode = "404", description = "Service not indexed")
+    })
+    @GetMapping("/external-endpoints")
+    public ResponseEntity<ResponseEnvelope<List<ExternalEndpointFactView>>> getExternalEndpoints(
+            @RequestParam String serviceId,
+            @RequestParam(defaultValue = "acme") String orgId,
+            @RequestParam(defaultValue = "") String repo,
+            @RequestParam(required = false) String env,
+            @RequestParam(required = false) String partner,
+            @RequestParam(required = false) String flowStep) {
+
+        FreshnessStatus status = freshnessResolver.resolve(serviceId, staleThresholdMinutes);
+        if (status == FreshnessStatus.NOT_INDEXED) {
+            return ResponseEntity.status(404).body(ResponseEnvelope.notIndexed());
+        }
+
+        String cacheKey = String.join("|",
+                env != null ? env : "",
+                partner != null ? partner : "",
+                flowStep != null ? flowStep : "");
+
+        @SuppressWarnings("unchecked")
+        List<ExternalEndpointFactView> facts = cache.get(orgId, repo, serviceId,
+                "facts:external-endpoints", cacheKey,
+                () -> queryExternalEndpointFacts(serviceId, env, partner, flowStep),
+                (Class<List<ExternalEndpointFactView>>) (Class<?>) List.class);
+
+        RunMeta run = latestRun(serviceId);
+        var envelope = ResponseEnvelope.of(run.indexedAt(), run.commitSha(), status, facts);
+        int httpStatus = status == FreshnessStatus.INDEXING ? 202 : 200;
+        return ResponseEntity.status(httpStatus).body(envelope);
+    }
+
+    private List<ExternalEndpointFactView> queryExternalEndpointFacts(
+            String serviceId, String env, String partner, String flowStep) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT endpoint_id, partner_slug, operation, http_method, url_template, url_resolved,
+                       env_lane, boundary, config_key, caller_class_fqn, client_class_fqn, flow_step,
+                       auth_scheme, evidence_source, confidence, indexed_at
+                FROM external_endpoint_facts
+                WHERE service_id = :svcId
+                """);
+        if (env != null && !env.isBlank()) sql.append(" AND env_lane = :env");
+        if (partner != null && !partner.isBlank()) sql.append(" AND partner_slug = :partner");
+        if (flowStep != null && !flowStep.isBlank()) sql.append(" AND flow_step = :flowStep");
+        sql.append(" ORDER BY endpoint_id, env_lane");
+
+        var spec = db.sql(sql.toString()).param("svcId", serviceId);
+        if (env != null && !env.isBlank()) spec = spec.param("env", env);
+        if (partner != null && !partner.isBlank()) spec = spec.param("partner", partner);
+        if (flowStep != null && !flowStep.isBlank()) spec = spec.param("flowStep", flowStep);
+
+        return spec.query((rs, row) -> new ExternalEndpointFactView(
+                rs.getString("endpoint_id"),
+                rs.getString("partner_slug"),
+                rs.getString("operation"),
+                rs.getString("http_method"),
+                rs.getString("url_template"),
+                rs.getString("url_resolved"),
+                rs.getString("env_lane"),
+                rs.getString("boundary"),
+                rs.getString("config_key"),
+                rs.getString("caller_class_fqn"),
+                rs.getString("client_class_fqn"),
+                rs.getString("flow_step"),
+                rs.getString("auth_scheme"),
+                rs.getString("evidence_source"),
+                rs.getDouble("confidence"),
+                rs.getTimestamp("indexed_at") != null
+                        ? rs.getTimestamp("indexed_at").toInstant() : null
+        )).list();
+    }
+
     @Operation(summary = "Get outbound HTTP call facts for a service",
                description = """
                    Returns all detected outbound HTTP calls made by the service. \
@@ -193,12 +294,31 @@ public class FactQueryController {
     }
 
     private List<SymbolFactView> querySymbolsByFile(String serviceId, List<String> filePaths) {
+        List<String> exactPaths = new ArrayList<>();
+        List<String> suffixPatterns = new ArrayList<>();
+        for (String raw : filePaths) {
+            if (raw == null || raw.isBlank()) {
+                continue;
+            }
+            String normalized = raw.replace('\\', '/');
+            exactPaths.add(normalized);
+            int slash = normalized.lastIndexOf('/');
+            if (slash >= 0) {
+                suffixPatterns.add("%" + normalized.substring(slash));
+            }
+        }
+
         return db.sql("""
                 SELECT DISTINCT ON (symbol_fqn, symbol_kind)
                        symbol_fqn, symbol_kind, attributes, evidence_source, confidence, indexed_at
                 FROM symbol_facts
                 WHERE service_id = :svcId
-                  AND file_path = ANY(:paths)
+                  AND file_path IS NOT NULL
+                  AND file_path <> ''
+                  AND (
+                        file_path = ANY(:paths)
+                        OR (:useSuffix = TRUE AND file_path LIKE ANY(:suffixes))
+                  )
                   AND symbol_kind IN ('CLASS', 'ENDPOINT')
                   AND commit_sha = (
                       SELECT commit_sha FROM analysis_runs
@@ -208,7 +328,9 @@ public class FactQueryController {
                 ORDER BY symbol_fqn, symbol_kind, indexed_at DESC
                 """)
                 .param("svcId", serviceId)
-                .param("paths", filePaths.toArray(new String[0]))
+                .param("paths", exactPaths.toArray(new String[0]))
+                .param("useSuffix", !suffixPatterns.isEmpty())
+                .param("suffixes", suffixPatterns.toArray(new String[0]))
                 .query((rs, row) -> new SymbolFactView(
                         rs.getString("symbol_fqn"),
                         rs.getString("symbol_kind"),

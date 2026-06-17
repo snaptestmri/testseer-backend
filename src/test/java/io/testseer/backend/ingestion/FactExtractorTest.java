@@ -11,7 +11,7 @@ class FactExtractorTest {
     private final FactExtractor extractor = new FactExtractor();
 
     private static ParsedModel modelWithEndpoint(String httpMethod, String path) {
-        return new ParsedModel(
+        return ParsedModel.of(
                 "OrderController.java",
                 "com.example.OrderController",
                 List.of("RestController", "RequestMapping"),
@@ -50,7 +50,7 @@ class FactExtractorTest {
 
     @Test
     void extractsOutboundCallFacts() {
-        ParsedModel model = new ParsedModel(
+        ParsedModel model = ParsedModel.of(
                 "OrderService.java", "com.example.OrderService",
                 List.of(), List.of("RestClient"), List.of(),
                 List.of(), List.of(new ParsedModel.OutboundCallDef("RestClient", "GET", "/inventory", "getInventory")),
@@ -67,7 +67,7 @@ class FactExtractorTest {
 
     @Test
     void unsupportedConstruct_emittedForParseError() {
-        ParsedModel errorModel = new ParsedModel(
+        ParsedModel errorModel = ParsedModel.of(
                 "Bad.java", null, List.of(), List.of(), List.of(),
                 List.of(), List.of(), true, "complex annotation",
                 null, List.of(), List.of()
@@ -83,7 +83,7 @@ class FactExtractorTest {
 
     @Test
     void extractMethodFacts_emitsMethodSymbols() {
-        ParsedModel model = new ParsedModel(
+        ParsedModel model = ParsedModel.of(
                 "OrderService.java", "io.orders.OrderService",
                 List.of(), List.of(), List.of(), List.of(), List.of(), false, null,
                 "Manages orders",
@@ -105,7 +105,7 @@ class FactExtractorTest {
 
     @Test
     void extractEnumFacts_emitsEnumSymbol() {
-        ParsedModel model = new ParsedModel(
+        ParsedModel model = ParsedModel.of(
                 "OrderStatus.java", "io.orders.OrderStatus",
                 List.of(), List.of(), List.of(), List.of(), List.of(), false, null,
                 "Order lifecycle states",
@@ -123,7 +123,7 @@ class FactExtractorTest {
 
     @Test
     void extractMethodFacts_returnsEmpty_whenNoPublicMethods() {
-        ParsedModel model = new ParsedModel(
+        ParsedModel model = ParsedModel.of(
                 "Foo.java", "io.Foo", List.of(), List.of(), List.of(),
                 List.of(), List.of(), false, null,
                 null, List.of(), List.of()

@@ -1,5 +1,6 @@
 package io.testseer.backend.admin;
 
+import io.testseer.backend.config.WorkspaceCatalogService;
 import io.testseer.backend.ingestion.AnalysisRunTracker;
 import io.testseer.backend.ingestion.GitHubTreeFetcher;
 import io.testseer.backend.registry.ServiceEntry;
@@ -15,6 +16,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -29,6 +31,7 @@ class IndexTriggerServiceTest {
     @Mock KafkaJobPublisher publisher;
     @Mock AnalysisRunTracker runTracker;
     @Mock JdbcClient db;
+    @Mock WorkspaceCatalogService workspaceCatalog;
 
     @InjectMocks IndexTriggerService service;
 
@@ -45,6 +48,7 @@ class IndexTriggerServiceTest {
         var spec = mock(JdbcClient.StatementSpec.class, RETURNS_DEEP_STUBS);
         when(db.sql(anyString())).thenReturn(spec);
         when(spec.param(anyString(), any()).query(Integer.class).single()).thenReturn(0);
+        when(workspaceCatalog.findCatalogLibraryByRepo("acme", "orders")).thenReturn(Optional.empty());
         when(treeFetcher.fetchJavaPaths("acme", "orders", "abc123"))
                 .thenReturn(List.of("src/main/java/Foo.java", "src/main/java/Bar.java"));
 
@@ -70,6 +74,7 @@ class IndexTriggerServiceTest {
         var spec = mock(JdbcClient.StatementSpec.class, RETURNS_DEEP_STUBS);
         when(db.sql(anyString())).thenReturn(spec);
         when(spec.param(anyString(), any()).query(Integer.class).single()).thenReturn(0);
+        when(workspaceCatalog.findCatalogLibraryByRepo("acme", "orders")).thenReturn(Optional.empty());
         when(treeFetcher.resolveHeadSha("acme", "orders")).thenReturn("headsha");
         when(treeFetcher.fetchJavaPaths("acme", "orders", "headsha"))
                 .thenReturn(List.of("src/main/java/Foo.java"));

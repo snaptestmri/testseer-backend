@@ -7,7 +7,6 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @Tag(name = "Admin — Indexing", description = "Trigger on-demand indexing of Java services")
@@ -42,10 +41,5 @@ public class LocalIndexTriggerController {
     public LocalIndexTriggerResponse trigger(
             @Valid @RequestBody LocalIndexTriggerRequest request) {
         return triggerService.trigger(request);
-    }
-
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<String> handleBadPath(IllegalArgumentException ex) {
-        return ResponseEntity.badRequest().body(ex.getMessage());
     }
 }

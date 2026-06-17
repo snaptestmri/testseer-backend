@@ -5,9 +5,12 @@ import io.swagger.v3.oas.models.info.Contact;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
 import io.swagger.v3.oas.models.servers.Server;
+import io.swagger.v3.oas.models.tags.Tag;
+import org.springdoc.core.customizers.OpenApiCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.Comparator;
 import java.util.List;
 
 @Configuration
@@ -32,5 +35,15 @@ public class OpenApiConfig {
                 .servers(List.of(
                         new Server().url("http://localhost:8080").description("Local development")
                 ));
+    }
+
+    /** Stable tag ordering so OpenApiExportTest and OpenApiGovernanceTest agree across JVM runs. */
+    @Bean
+    public OpenApiCustomizer stableOpenApiTagOrdering() {
+        return openApi -> {
+            if (openApi.getTags() != null) {
+                openApi.getTags().sort(Comparator.comparing(Tag::getName, String.CASE_INSENSITIVE_ORDER));
+            }
+        };
     }
 }

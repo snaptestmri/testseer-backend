@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.testcontainers.containers.MongoDBContainer;
@@ -21,9 +22,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(properties = {
     "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration," +
-        "com.google.cloud.spring.autoconfigure.pubsub.GcpPubSubAutoConfiguration"
+        "com.google.cloud.spring.autoconfigure.pubsub.GcpPubSubAutoConfiguration,com.google.cloud.spring.autoconfigure.pubsub.GcpPubSubReactiveAutoConfiguration"
 })
 @Testcontainers
+@Import(io.testseer.backend.KafkaTestConfiguration.class)
 class GraphProjectionIntegrationTest {
 
     @Container @ServiceConnection
@@ -57,6 +59,8 @@ class GraphProjectionIntegrationTest {
     void forwardReachability_classes_findsTransitiveDependencies() {
         ReachabilityResult result = graphService.classDependsOnClassForward("cls-order-ctrl");
         assertThat(result.nodeIds()).contains("cls-order-svc");
+        assertThat(result.nodes()).isNotEmpty();
+        assertThat(result.edges()).isNotEmpty();
     }
 
     @Test
@@ -89,6 +93,8 @@ class GraphProjectionIntegrationTest {
         ReachabilityResult result = graphService.sharedTypeResolution(
                 "com.example.shared.OrderDto");
         assertThat(result.nodeIds()).containsExactly("type-order-dto");
+        assertThat(result.nodes()).isEmpty();
+        assertThat(result.edges()).isEmpty();
     }
 
     @Test
@@ -131,14 +137,14 @@ class GraphProjectionIntegrationTest {
                 List.of("src/main/java"), List.of("src/test/java"), null));
         String serviceId = reg.serviceId();
 
-        ParsedModel orderService = new ParsedModel(
+        ParsedModel orderService = ParsedModel.of(
                 "src/main/java/com/example/OrderService.java",
                 "com.example.OrderService",
                 List.of(), List.of(), List.of("OrderRepository"),
                 List.of(), List.of(), false, null,
                 null, List.of(), List.of());
 
-        ParsedModel orderController = new ParsedModel(
+        ParsedModel orderController = ParsedModel.of(
                 "src/main/java/com/example/OrderController.java",
                 "com.example.OrderController",
                 List.of("RestController"),
@@ -148,7 +154,7 @@ class GraphProjectionIntegrationTest {
                 null, List.of(), List.of());
 
         var batch2Facts = factExtractor.extractSymbolFacts(orderService);
-        FactBatch batchFull = new FactBatch(
+        FactBatch batchFull = FactBatch.core(
                 "job-1", "acme", "orders-repo", serviceId, "abc123", "BASELINE",
                 java.util.stream.Stream.concat(
                         factExtractor.extractSymbolFacts(orderController).stream(),

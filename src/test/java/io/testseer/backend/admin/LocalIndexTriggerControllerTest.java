@@ -1,10 +1,12 @@
 package io.testseer.backend.admin;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.testseer.backend.api.TestSeerExceptionHandler;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -14,6 +16,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(LocalIndexTriggerController.class)
+@Import(TestSeerExceptionHandler.class)
 class LocalIndexTriggerControllerTest {
 
     @Autowired MockMvc mockMvc;
@@ -24,7 +27,7 @@ class LocalIndexTriggerControllerTest {
     @Test
     void trigger_returns200_withIndexResult() throws Exception {
         when(triggerService.trigger(any())).thenReturn(
-                new LocalIndexTriggerResponse("svc-001", "orders", "abc123", 42, true));
+                new LocalIndexTriggerResponse("svc-001", "orders", "abc123", 42, 0, 0, 0, true));
 
         mockMvc.perform(post("/admin/index/local")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -45,7 +48,8 @@ class LocalIndexTriggerControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"orgId\":\"acme\",\"path\":\"/bad\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("not a directory")));
+                .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.message").value("Path is not a directory: /bad"));
     }
 
     @Test

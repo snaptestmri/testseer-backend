@@ -57,6 +57,55 @@ class LocalDirectoryFetcherTest {
     }
 
     @Test
+    void fetchJavaFiles_readsLegacyWindows1252Javadoc(@TempDir Path tmp) throws IOException {
+        Path pkg = Files.createDirectories(tmp.resolve("src/main/java/com/example"));
+        Files.write(pkg.resolve("Legacy.java"), new byte[] {
+                '/', '*', '*', ' ', 'X', (byte) 0x92, '0', '0', (byte) 0x92, ' ', '*', '/', '\n',
+                'c', 'l', 'a', 's', 's', ' ', 'L', 'e', 'g', 'a', 'c', 'y', ' ', '{', '}'
+        });
+
+        List<GitHubSourceFetcher.FetchedFile> files =
+                fetcher.fetchJavaFiles(tmp.toString());
+
+        assertThat(files).singleElement()
+                .extracting(GitHubSourceFetcher.FetchedFile::content)
+                .asString()
+                .contains("class Legacy")
+                .contains("X\u201900\u2019");
+    }
+
+    @Test
+    void readTextFile_acceptsUtf8(@TempDir Path tmp) throws IOException {
+        Path file = tmp.resolve("utf8.java");
+        Files.writeString(file, "class Utf8 { /* café */ }");
+
+        assertThat(LocalDirectoryFetcher.readTextFile(file)).contains("café");
+    }
+
+    @Test
+    void fetchJavaFilesFromRoots_preservesModulePrefixInPaths(@TempDir Path tmp) throws IOException {
+        Path consumerRoot = Files.createDirectories(
+                tmp.resolve("partner-adapter-consumer/src/main/java/com/example"));
+        Files.writeString(consumerRoot.resolve("OfferConsumer.java"), "class OfferConsumer {}");
+
+        Path libRoot = Files.createDirectories(
+                tmp.resolve("partner-adapter-lib/src/main/java/com/example"));
+        Files.writeString(libRoot.resolve("Helper.java"), "class Helper {}");
+
+        List<GitHubSourceFetcher.FetchedFile> files = fetcher.fetchJavaFilesFromRoots(
+                tmp.toString(),
+                List.of(
+                        "partner-adapter-consumer/src/main/java",
+                        "partner-adapter-lib/src/main/java"));
+
+        assertThat(files).hasSize(2);
+        assertThat(files.stream().map(GitHubSourceFetcher.FetchedFile::path))
+                .containsExactlyInAnyOrder(
+                        "partner-adapter-consumer/src/main/java/com/example/OfferConsumer.java",
+                        "partner-adapter-lib/src/main/java/com/example/Helper.java");
+    }
+
+    @Test
     void resolveGitSha_returnsFallback_whenNotGitRepo(@TempDir Path tmp) {
         String sha = fetcher.resolveGitSha(tmp.toString());
         assertThat(sha).startsWith("local-");

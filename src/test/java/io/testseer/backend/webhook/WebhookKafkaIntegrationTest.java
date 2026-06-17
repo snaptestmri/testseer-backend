@@ -79,15 +79,18 @@ class WebhookKafkaIntegrationTest {
 
         Map<String, Object> consumerProps = KafkaTestUtils.consumerProps(
                 "test-consumer-" + System.currentTimeMillis(), "false", broker);
+        consumerProps.put("key.deserializer",
+                "org.apache.kafka.common.serialization.StringDeserializer");
         consumerProps.put("value.deserializer",
                 "org.springframework.kafka.support.serializer.JsonDeserializer");
         consumerProps.put("spring.json.value.default.type",
                 "io.testseer.backend.webhook.IngestionJob");
+        consumerProps.put("spring.json.trusted.packages", "io.testseer.backend.webhook");
 
         try (Consumer<String, IngestionJob> consumer =
                      new DefaultKafkaConsumerFactory<String, IngestionJob>(consumerProps)
                              .createConsumer()) {
-            broker.consumeFromAnEmbeddedTopic(consumer, KafkaTopicsConfig.TOPIC_PR);
+            consumer.subscribe(List.of(KafkaTopicsConfig.TOPIC_PR));
             ConsumerRecord<String, IngestionJob> record =
                     KafkaTestUtils.getSingleRecord(consumer, KafkaTopicsConfig.TOPIC_PR, Duration.ofSeconds(5));
 

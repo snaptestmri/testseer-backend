@@ -7,6 +7,8 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import io.testseer.backend.ingestion.GitHubSourceFetcher;
+import io.testseer.backend.observability.TestSeerMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -26,22 +28,31 @@ public class WebhookController {
     private final JobDecomposer decomposer;
     private final KafkaJobPublisher publisher;
     private final ObjectMapper mapper;
+    private final TestSeerMetrics metrics;
+    private final GitHubSourceFetcher sourceFetcher;
+    private final WebhookCatalogRegistrar catalogRegistrar;
 
     public WebhookController(GitHubSignatureValidator signatureValidator,
                               JobDecomposer decomposer,
                               KafkaJobPublisher publisher,
-                              ObjectMapper mapper) {
+                              ObjectMapper mapper,
+                              TestSeerMetrics metrics,
+                              GitHubSourceFetcher sourceFetcher,
+                              WebhookCatalogRegistrar catalogRegistrar) {
         this.signatureValidator = signatureValidator;
         this.decomposer = decomposer;
         this.publisher = publisher;
         this.mapper = mapper;
+        this.metrics = metrics;
+        this.sourceFetcher = sourceFetcher;
+        this.catalogRegistrar = catalogRegistrar;
     }
 
     @Operation(summary = "Receive GitHub webhook",
                description = """
                    Accepts GitHub `push` and `pull_request` webhook events. \
-                   Validates the HMAC-SHA256 signature, extracts changed Java files, \
-                   and queues analysis jobs to Kafka. Returns 202 Accepted on success.""")
+                   Validates the HMAC-SHA256 signature, extracts changed files (including OpenAPI JSON via \
+                   GitHub PR files API when needed), and queues analysis jobs to Kafka. Returns 202 Accepted on success.""")
     @ApiResponses({
         @ApiResponse(responseCode = "202", description = "Webhook accepted and queued"),
         @ApiResponse(responseCode = "200", description = "Webhook received but ignored (unsupported event or action)"),
@@ -57,8 +68,11 @@ public class WebhookController {
 
         if (!signatureValidator.isValid(payload, signature)) {
             log.warn("Rejected webhook with invalid signature for event={}", event);
+            metrics.recordWebhookRejected("invalid_signature");
             return ResponseEntity.status(401).build();
         }
+
+        metrics.recordWebhookReceived(event);
 
         return switch (event) {
             case "pull_request" -> handlePullRequest(payload);
@@ -84,6 +98,11 @@ public class WebhookController {
             int    prNumber  = node.path("number").asInt();
 
             List<String> changedFiles = extractChangedFiles(node);
+            if (changedFiles.isEmpty()) {
+                changedFiles = sourceFetcher.fetchPullRequestChangedFiles(orgId, repo, prNumber);
+            }
+
+            catalogRegistrar.ensureCatalogRegistered(orgId, repo);
             List<IngestionJob> jobs = decomposer.decompose(
                     orgId, repo, commitSha, "PR", prNumber, changedFiles);
 
@@ -110,6 +129,8 @@ public class WebhookController {
             String commitSha = node.path("after").asText();
 
             List<String> changedFiles = extractChangedFiles(node);
+
+            catalogRegistrar.ensureCatalogRegistered(orgId, repo);
             List<IngestionJob> jobs = decomposer.decompose(
                     orgId, repo, commitSha, "PUSH", null, changedFiles);
 

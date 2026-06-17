@@ -78,4 +78,34 @@ class GitHubTreeFetcherTest {
         // Truncation is a warning, not a failure — still returns what was found
         assertThat(paths).hasSize(1);
     }
+
+    @Test
+    void fetchJsonPaths_filtersBySourceRoots() {
+        var responseSpec = mock(RestClient.ResponseSpec.class, RETURNS_DEEP_STUBS);
+        var uriSpec = mock(RestClient.RequestHeadersUriSpec.class, RETURNS_DEEP_STUBS);
+        var restClient = mock(RestClient.class);
+
+        when(restClient.get()).thenReturn(uriSpec);
+        when(uriSpec.uri(anyString(), any(), any(), any())).thenReturn(uriSpec);
+        when(uriSpec.retrieve()).thenReturn(responseSpec);
+        when(responseSpec.body(Map.class)).thenReturn(Map.of(
+                "truncated", false,
+                "tree", List.of(
+                        Map.of("path", "reference/Offers/Foo.json", "type", "blob"),
+                        Map.of("path", "Common/Models/Bar.json", "type", "blob"),
+                        Map.of("path", "README.json", "type", "blob"),
+                        Map.of("path", "src/main/java/Foo.java", "type", "blob")
+                )
+        ));
+
+        GitHubTreeFetcher fetcher = new GitHubTreeFetcher(restClient);
+        List<String> paths = fetcher.fetchJsonPaths(
+                "quotient", "riq-platform-apis-optimus", "abc123",
+                List.of("reference", "Common/Models"));
+
+        assertThat(paths).containsExactlyInAnyOrder(
+                "reference/Offers/Foo.json",
+                "Common/Models/Bar.json"
+        );
+    }
 }

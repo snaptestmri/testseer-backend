@@ -1,10 +1,10 @@
 # TestSeer Central Backend — Phase 1 System Design
 
 > **Status:** Canonical  
-> **Last verified:** 2026-06-05  
+> **Last verified:** 2026-06-12  
 > **Authoritative for:** Trade-offs, SLOs, revisit triggers (§6)
 
-**Implementation (2026-06-05):** See [CURRENT_STATUS.md](../../docs/CURRENT_STATUS.md). OpenAPI supersedes endpoint tables when they differ.
+**Implementation (2026-06-12):** See [CURRENT_STATUS.md](../../docs/CURRENT_STATUS.md). OpenAPI and [TestSeer_REST_API_Design.md](TestSeer_REST_API_Design.md) supersede endpoint/error tables when they differ.
 
 **Phase:** Phase 1 (Weeks 3–6): Platform MVP
 **Date:** 2026-05-21
@@ -174,7 +174,7 @@ Plugin ──▶ GET /v1/facts/class?symbolFqn=...
 | — | `/v1/graph/cross-service` | Cross-service boundary | — | **Internal only** |
 | `GET` | `/v1/graph/shared-type` | Canonical shared type by `symbol_fqn` | Yes | Yes |
 | `GET` | `/v1/graph/type-fanout` | Services consuming a shared type | Yes | Yes |
-| `GET` | `/v1/impact/pr` | PR impact analysis | No | Yes |
+| `GET` | `/v1/impact/pr` | PR impact analysis | Yes (`impact:pr`) | Yes |
 | `GET` | `/v1/services/{id}/description` | LLM service description | Yes | Yes |
 | `GET` | `/v1/status/{serviceId}` | Index job status + freshness | No | Yes |
 | `POST` | `/registry/services` | Register a service | — | Yes |
@@ -185,24 +185,28 @@ Plugin ──▶ GET /v1/facts/class?symbolFqn=...
 
 **Freshness status matrix:**
 
-| Status | Condition |
-|--------|-----------|
-| `CURRENT` | `indexed_at` within configured stale threshold |
-| `STALE` | `indexed_at` beyond threshold; last known facts still returned |
-| `INDEXING` | Job in-flight in Kafka for this serviceId |
-| `NOT_INDEXED` | No facts row found for serviceId |
+| Status | Condition | HTTP (service-scoped queries) |
+|--------|-----------|-------------------------------|
+| `CURRENT` | `indexed_at` within configured stale threshold | 200 |
+| `STALE` | `indexed_at` beyond threshold; last known facts still returned | 200 |
+| `INDEXING` | Job in-flight in Kafka for this serviceId | **202** |
+| `NOT_INDEXED` | No facts row found for serviceId | **404** |
 
-**Error responses:**
+`GET /v1/status/{serviceId}` always returns 200 with envelope. Shared helper: `FreshnessHttp` — see [TestSeer_REST_API_Design.md](TestSeer_REST_API_Design.md) §6.
 
-| Scenario | HTTP | Error Code |
-|----------|------|------------|
-| ServiceId unknown to registry | 404 | `NOT_REGISTERED` |
-| Index job in-progress | 202 | `INDEXING` (with last known facts) |
-| Postgres unavailable | 503 | `STORE_UNAVAILABLE` |
+**Error responses (P16 — `ApiError` JSON):**
+
+| Scenario | HTTP | `error` enum |
+|----------|------|--------------|
+| ServiceId unknown to registry (commands) | 404 | `NOT_FOUND` |
+| Service never indexed (queries) | 404 | _(ResponseEnvelope with `NOT_INDEXED`)_ |
+| Index job in-progress (queries) | 202 | _(ResponseEnvelope with `INDEXING`)_ |
+| Postgres / LLM unavailable | 503 | `SERVICE_UNAVAILABLE` |
 | Unregistered repo webhook | 200 | (silent drop, logged) |
-| Invalid webhook signature | 401 | `INVALID_SIGNATURE` |
-| Registry field validation | 400 | `VALIDATION_ERROR` (field-level) |
-| Duplicate service registration | 409 | `DUPLICATE_SERVICE` |
+| Invalid webhook signature | 401 | _(plain webhook response — not ApiError)_ |
+| Registry field validation | 400 | `VALIDATION_ERROR` |
+| Duplicate service registration | 409 | `CONFLICT` |
+| Duplicate in-flight index job | 409 | `CONFLICT` |
 
 ### 2.4 Storage Choices
 
@@ -364,7 +368,14 @@ GET /v1/graph/reachability?serviceId=X
 | `testseer.jobs.pr` | 12 | 3 | 24h | `testseer-workers-pr` |
 | `testseer.jobs.batch` | 6 | 3 | 72h | `testseer-workers-batch` |
 | `testseer.jobs.dlq` | 3 | 3 | 7d | (monitored only) |
-| `testseer.index.complete` | 6 | 3 | 1h | `testseer-query-invalidator` |
+
+**GCP Pub/Sub (cache invalidation + IDE notifications, optional locally):**
+
+| Topic | Subscription | Consumer | Purpose |
+|-------|--------------|----------|---------|
+| `testseer-index-complete` | `testseer-index-complete-sub` | `CacheInvalidationListener` | Cross-replica Redis eviction (`PUBSUB_ENABLED=true`) |
+
+Index complete also invalidates Redis in-process via `IndexCompleteNotifier` on every replica that processes the job.
 
 **Job envelope:**
 

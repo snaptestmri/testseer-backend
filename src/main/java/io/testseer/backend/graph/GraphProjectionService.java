@@ -8,10 +8,17 @@ import java.util.List;
 @Service
 public class GraphProjectionService {
 
-    private final JdbcClient db;
+    private static final String CLASS_EDGE_TYPES = "'DEPENDS_ON', 'INVOKES', 'ROUTES_TO'";
+    private static final String METHOD_EDGE_TYPES = "'INVOKES', 'ROUTES_TO'";
+    private static final String IMPACT_EDGE_TYPES =
+            "'CALLS', 'DEPENDS_ON', 'USES_TYPE', 'INVOKES', 'ROUTES_TO'";
 
-    public GraphProjectionService(JdbcClient db) {
+    private final JdbcClient db;
+    private final GraphSubgraphHydrator hydrator;
+
+    public GraphProjectionService(JdbcClient db, GraphSubgraphHydrator hydrator) {
         this.db = db;
+        this.hydrator = hydrator;
     }
 
     public ReachabilityResult serviceCallsServiceForward(String serviceNodeId) {
@@ -28,24 +35,55 @@ public class GraphProjectionService {
                 JOIN reachable r ON n.id = r.node_id
                 WHERE n.node_type = 'SERVICE'
                 """;
-        return query(sql, "id", serviceNodeId);
+        return hydrate(serviceNodeId, queryIds(sql, "id", serviceNodeId));
     }
 
     public ReachabilityResult classDependsOnClassForward(String classNodeId) {
         String sql = """
                 WITH RECURSIVE reachable(node_id) AS (
                     SELECT to_node FROM graph_edges
-                    WHERE from_node = :id AND edge_type = 'DEPENDS_ON'
+                    WHERE from_node = :id AND edge_type IN ("""
+                + CLASS_EDGE_TYPES + """
+                    )
                     UNION
                     SELECT e.to_node FROM graph_edges e
                     JOIN reachable r ON e.from_node = r.node_id
-                    WHERE e.edge_type = 'DEPENDS_ON'
+                    WHERE e.edge_type IN ("""
+                + CLASS_EDGE_TYPES + """
+                    )
                 )
                 SELECT n.id FROM graph_nodes n
                 JOIN reachable r ON n.id = r.node_id
-                WHERE n.node_type = 'CLASS'
+                WHERE n.node_type IN ('CLASS', 'METHOD')
                 """;
-        return query(sql, "id", classNodeId);
+        return hydrate(classNodeId, queryIds(sql, "id", classNodeId));
+    }
+
+    public ReachabilityResult methodForward(String methodNodeId, int maxDepth) {
+        int depth = maxDepth > 0 ? maxDepth : 6;
+        String sql = """
+                WITH RECURSIVE reachable(node_id, depth) AS (
+                    SELECT to_node, 1 FROM graph_edges
+                    WHERE from_node = :id AND edge_type IN ("""
+                + METHOD_EDGE_TYPES + """
+                    )
+                    UNION
+                    SELECT e.to_node, r.depth + 1 FROM graph_edges e
+                    JOIN reachable r ON e.from_node = r.node_id
+                    WHERE e.edge_type IN ("""
+                + METHOD_EDGE_TYPES + """
+                    ) AND r.depth < :maxDepth
+                )
+                SELECT DISTINCT n.id FROM graph_nodes n
+                JOIN reachable r ON n.id = r.node_id
+                WHERE n.node_type IN ('CLASS', 'METHOD')
+                """;
+        List<String> ids = db.sql(sql)
+                .param("id", methodNodeId)
+                .param("maxDepth", depth)
+                .query(String.class)
+                .list();
+        return hydrate(methodNodeId, ids);
     }
 
     public ReachabilityResult endpointCallsOutbound(String endpointNodeId) {
@@ -61,33 +99,39 @@ public class GraphProjectionService {
                 SELECT n.id FROM graph_nodes n
                 JOIN reachable r ON n.id = r.node_id
                 """;
-        return query(sql, "id", endpointNodeId);
+        return hydrate(endpointNodeId, queryIds(sql, "id", endpointNodeId));
     }
 
     public ReachabilityResult reverseReachability(String nodeId) {
         String sql = """
                 WITH RECURSIVE affected(node_id) AS (
                     SELECT from_node FROM graph_edges
-                    WHERE to_node = :id AND edge_type IN ('CALLS', 'DEPENDS_ON', 'USES_TYPE')
+                    WHERE to_node = :id AND edge_type IN ("""
+                + IMPACT_EDGE_TYPES + """
+                    )
                     UNION
                     SELECT e.from_node FROM graph_edges e
                     JOIN affected a ON e.to_node = a.node_id
-                    WHERE e.edge_type IN ('CALLS', 'DEPENDS_ON', 'USES_TYPE')
+                    WHERE e.edge_type IN ("""
+                + IMPACT_EDGE_TYPES + """
+                    )
                 )
                 SELECT n.id FROM graph_nodes n
                 JOIN affected a ON n.id = a.node_id
                 """;
-        return query(sql, "id", nodeId);
+        return hydrate(nodeId, queryIds(sql, "id", nodeId));
     }
 
     public ReachabilityResult immediateNeighborhood(String nodeId) {
         String sql = """
-                SELECT n.id FROM graph_nodes n
-                JOIN graph_edges e ON n.id = e.to_node
-                WHERE e.from_node = :id
-                  AND e.edge_type IN ('CALLS', 'DEPENDS_ON', 'OUTBOUND_TO')
+                SELECT DISTINCT n.id FROM graph_nodes n
+                JOIN graph_edges e ON (n.id = e.to_node AND e.from_node = :id)
+                                   OR (n.id = e.from_node AND e.to_node = :id)
+                WHERE n.id <> :id
+                  AND e.edge_type IN ('CALLS', 'DEPENDS_ON', 'OUTBOUND_TO', 'INVOKES',
+                                      'ROUTES_TO', 'SUBSCRIBES_TO', 'PUBLISHES_TO')
                 """;
-        return query(sql, "id", nodeId);
+        return hydrate(nodeId, queryIds(sql, "id", nodeId));
     }
 
     public ReachabilityResult crossServiceBoundary(String startNodeId) {
@@ -117,7 +161,7 @@ public class GraphProjectionService {
                 CROSS JOIN start_svc s
                 WHERE n.service <> s.service
                 """;
-        return queryTwoParams(sql, startNodeId);
+        return hydrate(startNodeId, queryTwoParamIds(sql, startNodeId));
     }
 
     public ReachabilityResult sharedTypeResolution(String symbolFqn) {
@@ -126,7 +170,7 @@ public class GraphProjectionService {
                 WHERE symbol_fqn = :fqn AND module_type = 'library'
                 """;
         List<String> ids = db.sql(sql).param("fqn", symbolFqn).query(String.class).list();
-        return new ReachabilityResult(ids, List.of());
+        return idsOnly(ids);
     }
 
     public ReachabilityResult typeUsageFanOut(String symbolFqn) {
@@ -140,19 +184,22 @@ public class GraphProjectionService {
                   AND e.edge_type = 'USES_TYPE'
                 """;
         List<String> ids = db.sql(sql).param("fqn", symbolFqn).query(String.class).list();
-        return new ReachabilityResult(ids, List.of());
+        return idsOnly(ids);
     }
 
-    private ReachabilityResult query(String sql, String paramName, String paramValue) {
-        List<String> ids = db.sql(sql).param(paramName, paramValue).query(String.class).list();
-        return new ReachabilityResult(ids, List.of());
+    private ReachabilityResult hydrate(String anchorNodeId, List<String> reachableIds) {
+        return hydrator.hydrate(anchorNodeId, reachableIds);
     }
 
-    private ReachabilityResult queryTwoParams(String sql, String nodeId) {
-        List<String> ids = db.sql(sql)
-                .param("id", nodeId)
-                .query(String.class)
-                .list();
-        return new ReachabilityResult(ids, List.of());
+    private static ReachabilityResult idsOnly(List<String> ids) {
+        return new ReachabilityResult(ids, List.of(), List.of());
+    }
+
+    private List<String> queryIds(String sql, String paramName, String paramValue) {
+        return db.sql(sql).param(paramName, paramValue).query(String.class).list();
+    }
+
+    private List<String> queryTwoParamIds(String sql, String nodeId) {
+        return db.sql(sql).param("id", nodeId).query(String.class).list();
     }
 }

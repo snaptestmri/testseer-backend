@@ -49,6 +49,10 @@ public class ServiceRegistryService {
         return repository.findByOrgRepoService(orgId, serviceName, serviceName);
     }
 
+    public Optional<ServiceEntry> getByOrgRepoAndName(String orgId, String repo, String serviceName) {
+        return repository.findByOrgRepoService(orgId, repo, serviceName);
+    }
+
     public List<ServiceEntry> listAll() {
         return repository.findAll();
     }

@@ -1,40 +1,25 @@
 package io.testseer.backend.query;
 
+import io.testseer.backend.AbstractIntegrationTest;
+import io.testseer.backend.IntegrationTestDb;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.testcontainers.containers.MongoDBContainer;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(properties = {
-    "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration," +
-        "com.google.cloud.spring.autoconfigure.pubsub.GcpPubSubAutoConfiguration"
-})
-@Testcontainers
-class FreshnessResolverTest {
-
-    @Container @ServiceConnection
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16");
-    @Container @ServiceConnection
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7");
-
+class FreshnessResolverTest extends AbstractIntegrationTest {
     @Autowired FreshnessResolver resolver;
     @Autowired JdbcClient db;
 
     @BeforeEach
     void cleanup() {
-        db.sql("DELETE FROM analysis_runs").update();
-        db.sql("DELETE FROM service_registry").update();
+        IntegrationTestDb.clearCoreFacts(db);
         db.sql("""
             INSERT INTO service_registry(service_id, org_id, repo, service_name, build_tool, enabled)
             VALUES ('svc-001', 'acme', 'repo', 'orders', 'MAVEN', true)
@@ -65,8 +50,8 @@ class FreshnessResolverTest {
                                       attempt, enqueued_at, completed_at)
             VALUES ('job-002', 'acme', 'svc-001', 'abc', 'PR', 'COMPLETE', 1, :e, :c)
             """)
-            .param("e", recent)
-            .param("c", recent)
+            .param("e", Timestamp.from(recent))
+            .param("c", Timestamp.from(recent))
             .update();
 
         assertThat(resolver.resolve("svc-001", 60)).isEqualTo(FreshnessStatus.CURRENT);
@@ -80,8 +65,8 @@ class FreshnessResolverTest {
                                       attempt, enqueued_at, completed_at)
             VALUES ('job-003', 'acme', 'svc-001', 'abc', 'PR', 'COMPLETE', 1, :e, :c)
             """)
-            .param("e", old)
-            .param("c", old)
+            .param("e", Timestamp.from(old))
+            .param("c", Timestamp.from(old))
             .update();
 
         assertThat(resolver.resolve("svc-001", 60)).isEqualTo(FreshnessStatus.STALE);

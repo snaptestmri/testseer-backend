@@ -1,46 +1,41 @@
 package io.testseer.backend.analysis;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.Optional;
 
 @Tag(name = "Analysis", description = "Impact analysis and test planning based on the indexed knowledge graph")
 @RestController
 @RequestMapping("/v1/services")
 public class ServiceDescriptionController {
 
-    private final Optional<ServiceDescriptionService> descriptionService;
+    private final ServiceDescriptionService descriptionService;
 
-    public ServiceDescriptionController(
-            Optional<ServiceDescriptionService> descriptionService) {
+    public ServiceDescriptionController(ServiceDescriptionService descriptionService) {
         this.descriptionService = descriptionService;
     }
 
     @Operation(summary = "Get cached business description for a service")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Description returned"),
+        @ApiResponse(responseCode = "404", description = "No description stored yet")
+    })
     @GetMapping("/{serviceId}/description")
-    public ResponseEntity<String> getDescription(@PathVariable String serviceId) {
-        if (descriptionService.isEmpty()) {
-            return ResponseEntity.status(503)
-                    .body("LLM description disabled. Set ANTHROPIC_ENABLED=true.");
-        }
-        String stored = descriptionService.get().getStored(serviceId);
-        if (stored == null) {
-            return ResponseEntity.status(404)
-                    .body("No description generated yet. POST to this endpoint to generate.");
-        }
-        return ResponseEntity.ok(stored);
+    public ResponseEntity<ServiceDescriptionResponse> getDescription(@PathVariable String serviceId) {
+        return descriptionService.getStoredDetails(serviceId)
+                .map(stored -> ResponseEntity.ok(toResponse(serviceId, stored)))
+                .orElseThrow(() -> new DescriptionNotFoundException(serviceId));
     }
 
-    @Operation(summary = "Generate (or regenerate) business description via Claude API")
-    @PostMapping("/{serviceId}/description")
-    public ResponseEntity<String> generateDescription(@PathVariable String serviceId) {
-        if (descriptionService.isEmpty()) {
-            return ResponseEntity.status(503)
-                    .body("LLM description disabled. Set ANTHROPIC_ENABLED=true.");
-        }
-        return ResponseEntity.ok(descriptionService.get().generateAndStore(serviceId));
+    private static ServiceDescriptionResponse toResponse(
+            String serviceId, ServiceDescriptionService.StoredDescription stored) {
+        return new ServiceDescriptionResponse(
+                serviceId,
+                stored.description(),
+                stored.generatedAt(),
+                stored.model());
     }
 }

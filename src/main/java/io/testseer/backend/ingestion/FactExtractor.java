@@ -14,10 +14,11 @@ public class FactExtractor {
 
     public List<FactBatch.SymbolFact> extractSymbolFacts(ParsedModel model) {
         List<FactBatch.SymbolFact> result = new ArrayList<>();
+        String filePath = effectiveFilePath(model);
 
         if (model.classFqn() != null) {
             result.add(new FactBatch.SymbolFact(
-                    model.filePath(), model.classFqn(), "CLASS",
+                    filePath, model.classFqn(), "CLASS",
                     toJson(Map.of("annotations", model.annotations())),
                     "javaparser", 1.0
             ));
@@ -25,7 +26,7 @@ public class FactExtractor {
             for (ParsedModel.EndpointDef ep : model.endpoints()) {
                 String fqn = model.classFqn() + "#" + ep.methodName();
                 result.add(new FactBatch.SymbolFact(
-                        model.filePath(), fqn, "ENDPOINT",
+                        filePath, fqn, "ENDPOINT",
                         toJson(Map.of("httpMethod", ep.httpMethod(), "path", ep.path())),
                         "javaparser", 1.0
                 ));
@@ -59,7 +60,7 @@ public class FactExtractor {
 
         return model.publicMethods().stream()
                 .map(m -> new FactBatch.SymbolFact(
-                        model.filePath(),
+                        effectiveFilePath(model),
                         model.classFqn() + "#" + m.name(),
                         "METHOD",
                         toJson(Map.of(
@@ -78,7 +79,7 @@ public class FactExtractor {
         if (model.classFqn() == null || model.enumValues().isEmpty()) return List.of();
 
         return List.of(new FactBatch.SymbolFact(
-                model.filePath(),
+                effectiveFilePath(model),
                 model.classFqn(),
                 "ENUM",
                 toJson(Map.of(
@@ -88,6 +89,16 @@ public class FactExtractor {
                 "javaparser",
                 1.0
         ));
+    }
+
+    private String effectiveFilePath(ParsedModel model) {
+        if (model.filePath() != null && !model.filePath().isBlank()) {
+            return model.filePath().replace('\\', '/');
+        }
+        if (model.classFqn() != null) {
+            return model.classFqn().replace('.', '/') + ".java";
+        }
+        return "unknown.java";
     }
 
     private String toJson(Object value) {

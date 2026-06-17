@@ -40,7 +40,7 @@ public class DependencyTreeGraphService {
             boolean hydrate,
             boolean includeExternal) {
 
-        int cappedDepth = Math.max(1, Math.min(depth, 4));
+        int effectiveDepth = depth <= 0 ? Integer.MAX_VALUE : Math.max(1, depth);
 
         String rootModule = resolveRootModule(serviceId, commitSha, modulePath);
         if (rootModule == null) {
@@ -54,7 +54,7 @@ public class DependencyTreeGraphService {
         reachableModules.add(rootModule);
 
         int hops = 0;
-        while (!queue.isEmpty() && hops < cappedDepth) {
+        while (!queue.isEmpty() && hops < effectiveDepth) {
             int levelSize = queue.size();
             hops++;
             for (int i = 0; i < levelSize; i++) {

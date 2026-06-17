@@ -2,6 +2,7 @@ package io.testseer.backend.ingestion;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -17,6 +18,7 @@ public class GitHubSourceFetcher {
 
     private final RestClient restClient;
 
+    @Autowired
     public GitHubSourceFetcher(
             @Value("${testseer.github.token:}") String githubToken) {
         RestClient.Builder builder = RestClient.builder()
@@ -47,6 +49,59 @@ public class GitHubSourceFetcher {
                 .map(filePath -> fetch(orgId, repo, commitSha, filePath))
                 .filter(f -> f != null)
                 .toList();
+    }
+
+    /** Returns decoded content for each .sql / .cql file in changedFiles (Phase 5 DDL catalog). */
+    public List<FetchedFile> fetchDdlFiles(
+            String orgId, String repo, String commitSha,
+            List<String> changedFiles) {
+
+        return changedFiles.stream()
+                .filter(f -> {
+                    String lower = f.toLowerCase();
+                    return lower.endsWith(".sql") || lower.endsWith(".cql");
+                })
+                .map(filePath -> fetch(orgId, repo, commitSha, filePath))
+                .filter(f -> f != null)
+                .toList();
+    }
+
+    /** Returns decoded content for each .json file in changedFiles (BL-046 OpenAPI catalog). */
+    public List<FetchedFile> fetchJsonFiles(
+            String orgId, String repo, String commitSha,
+            List<String> changedFiles) {
+
+        return changedFiles.stream()
+                .filter(f -> f.toLowerCase().endsWith(".json"))
+                .map(filePath -> fetch(orgId, repo, commitSha, filePath))
+                .filter(f -> f != null)
+                .toList();
+    }
+
+    /** Lists changed file paths for a pull request (GitHub pulls/{n}/files API). */
+    @SuppressWarnings("unchecked")
+    public List<String> fetchPullRequestChangedFiles(String orgId, String repo, int prNumber) {
+        try {
+            List<Map<String, Object>> files = restClient.get()
+                    .uri("/repos/{org}/{repo}/pulls/{pr}/files", orgId, repo, prNumber)
+                    .retrieve()
+                    .body(List.class);
+
+            if (files == null) {
+                return List.of();
+            }
+            return files.stream()
+                    .map(f -> (String) f.get("filename"))
+                    .filter(f -> f != null && !f.isBlank())
+                    .toList();
+        } catch (Exception ex) {
+            log.warn("Failed to fetch PR #{} files for {}/{}: {}", prNumber, orgId, repo, ex.getMessage());
+            return List.of();
+        }
+    }
+
+    public FetchedFile fetchFile(String orgId, String repo, String commitSha, String filePath) {
+        return fetch(orgId, repo, commitSha, filePath);
     }
 
     private FetchedFile fetch(String orgId, String repo, String commitSha, String filePath) {

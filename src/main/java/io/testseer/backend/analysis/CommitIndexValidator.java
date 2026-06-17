@@ -18,11 +18,14 @@ public class CommitIndexValidator {
     public boolean isIndexed(String serviceId, String commitSha) {
         return db.sql("""
                 SELECT 1 FROM analysis_runs
-                WHERE service_id = :svcId AND commit_sha = :sha AND status = 'COMPLETE'
+                WHERE service_id = :svcId
+                  AND (commit_sha = :sha OR commit_sha LIKE :shaPrefix)
+                  AND status = 'COMPLETE'
                 LIMIT 1
                 """)
                 .param("svcId", serviceId)
                 .param("sha", commitSha)
+                .param("shaPrefix", commitSha + "%")
                 .query(Integer.class)
                 .optional()
                 .isPresent();
@@ -31,11 +34,14 @@ public class CommitIndexValidator {
     public Optional<RunMeta> runMetaForCommit(String serviceId, String commitSha) {
         return db.sql("""
                 SELECT completed_at, commit_sha FROM analysis_runs
-                WHERE service_id = :svcId AND commit_sha = :sha AND status = 'COMPLETE'
+                WHERE service_id = :svcId
+                  AND (commit_sha = :sha OR commit_sha LIKE :shaPrefix)
+                  AND status = 'COMPLETE'
                 ORDER BY completed_at DESC LIMIT 1
                 """)
                 .param("svcId", serviceId)
                 .param("sha", commitSha)
+                .param("shaPrefix", commitSha + "%")
                 .query((rs, row) -> new RunMeta(
                         rs.getTimestamp("completed_at") != null
                                 ? rs.getTimestamp("completed_at").toInstant() : null,

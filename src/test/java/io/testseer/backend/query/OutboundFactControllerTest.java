@@ -1,6 +1,8 @@
 package io.testseer.backend.query;
 
 import io.testseer.backend.graph.GraphProjectionService;
+import io.testseer.backend.graph.GraphRoutingService;
+import io.testseer.backend.query.flowdiagram.ServiceFlowDiagramComposer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -22,6 +24,8 @@ class OutboundFactControllerTest {
 
     @MockBean(answer = Answers.RETURNS_DEEP_STUBS) JdbcClient jdbcClient;
     @MockBean GraphProjectionService graphService;
+    @MockBean GraphRoutingService graphRoutingService;
+    @MockBean ServiceFlowDiagramComposer flowDiagramComposer;
     @MockBean FreshnessResolver freshnessResolver;
     @MockBean CacheService cacheService;
 

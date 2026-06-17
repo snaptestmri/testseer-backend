@@ -1,7 +1,11 @@
 package io.testseer.backend.graph;
 
+import io.testseer.backend.config.RoutingRulePack;
+import io.testseer.backend.config.RoutingRulePackLoader;
 import io.testseer.backend.ingestion.FactBatch;
 import io.testseer.backend.ingestion.ParsedModel;
+import io.testseer.backend.ingestion.catalog.ImportIndex;
+import io.testseer.backend.ingestion.catalog.TypeFqnResolver;
 import io.testseer.backend.query.IndexCompleteNotifier;
 import io.testseer.backend.registry.ServiceEntry;
 import io.testseer.backend.registry.ServiceRegistryService;
@@ -12,8 +16,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -27,31 +34,48 @@ public class GraphFactProjector {
     private final ServiceRegistryService registryService;
     private final JdbcClient db;
     private final IndexCompleteNotifier indexCompleteNotifier;
+    private final TypeFqnResolver typeFqnResolver;
+    private final RoutingRulePackLoader routingRulePackLoader;
 
     public GraphFactProjector(GraphNodeRepository nodeRepo,
                               IncrementalEdgeUpdater edgeUpdater,
                               ServiceRegistryService registryService,
                               JdbcClient db,
-                              IndexCompleteNotifier indexCompleteNotifier) {
+                              IndexCompleteNotifier indexCompleteNotifier,
+                              TypeFqnResolver typeFqnResolver,
+                              RoutingRulePackLoader routingRulePackLoader) {
         this.nodeRepo               = nodeRepo;
         this.edgeUpdater            = edgeUpdater;
         this.registryService        = registryService;
         this.db                     = db;
         this.indexCompleteNotifier  = indexCompleteNotifier;
+        this.typeFqnResolver        = typeFqnResolver;
+        this.routingRulePackLoader  = routingRulePackLoader;
     }
 
     @Transactional
     public void project(FactBatch batch, List<ParsedModel> models) {
+        project(batch, models, Map.of());
+    }
+
+    @Transactional
+    public void project(FactBatch batch, List<ParsedModel> models, Map<String, String> sourceByClassFqn) {
         ServiceEntry svc = registryService.getById(batch.serviceId());
         upsertServiceNode(svc);
 
+        Map<String, String> beanIndex = buildBeanIndex(models, routingRulePackLoader.getRulePack());
+        List<RoutingRow> routingRows = new ArrayList<>();
+
         for (ParsedModel model : models) {
             if (model.classFqn() == null || model.parseError()) continue;
-            projectModel(batch, svc, model);
+            String source = sourceByClassFqn != null ? sourceByClassFqn.get(model.classFqn()) : null;
+            projectModel(batch, svc, model, source, beanIndex, routingRows);
         }
 
+        persistRoutingFacts(batch, routingRows);
         refreshServiceCallEdges(batch.serviceId(), svc.serviceName());
-        indexCompleteNotifier.notifyComplete(batch.orgId(), batch.repo(), batch.serviceId());
+        indexCompleteNotifier.notifyComplete(
+                batch.orgId(), batch.repo(), batch.serviceId(), batch.commitSha(), batch.jobId());
         log.debug("Graph projection complete for service {} ({} models)", batch.serviceId(), models.size());
     }
 
@@ -68,20 +92,33 @@ public class GraphFactProjector {
         ));
     }
 
-    private void projectModel(FactBatch batch, ServiceEntry svc, ParsedModel model) {
+    private void projectModel(
+            FactBatch batch,
+            ServiceEntry svc,
+            ParsedModel model,
+            String sourceContent,
+            Map<String, String> beanIndex,
+            List<RoutingRow> routingRows) {
+
         String classNodeId = GraphNodeIds.classNode(batch.serviceId(), model.classFqn());
         nodeRepo.upsert(GraphNode.clazz(
                 classNodeId, svc.orgId(), svc.repo(), svc.serviceName(), model.classFqn()));
 
-        List<GraphEdge> dependsOnEdges = new ArrayList<>();
-        List<GraphEdge> usesTypeEdges = new ArrayList<>();
+        ImportIndex imports = sourceContent != null
+                ? ImportIndex.build(sourceContent)
+                : ImportIndex.build("package " + packageOf(model.classFqn()) + ";");
+        var ctx = new TypeFqnResolver.CompilationContext(batch.orgId(), batch.serviceId(), model.classFqn());
+
         Set<String> depTypes = new HashSet<>();
         depTypes.addAll(model.constructorParamTypes());
         depTypes.addAll(model.fieldInjectionTypes());
+        model.fieldInjections().forEach(f -> depTypes.add(f.declaredType()));
 
+        List<GraphEdge> dependsOnEdges = new ArrayList<>();
+        List<GraphEdge> usesTypeEdges = new ArrayList<>();
         for (String depType : depTypes) {
-            String depFqn = resolveTypeFqn(depType, model.classFqn());
-            if (depFqn.isBlank() || depFqn.equals(model.classFqn())) continue;
+            String depFqn = typeFqnResolver.resolve(depType, imports, ctx).fqn();
+            if (!isClassFqn(depFqn) || depFqn.equals(model.classFqn())) continue;
 
             Optional<String> libraryNode = findLibraryTypeNode(depFqn);
             if (libraryNode.isPresent()) {
@@ -98,6 +135,68 @@ public class GraphFactProjector {
         edgeUpdater.replaceEdges(classNodeId, "DEPENDS_ON", dependsOnEdges);
         edgeUpdater.replaceEdges(classNodeId, "USES_TYPE", usesTypeEdges);
 
+        List<GraphEdge> invokesEdges = new ArrayList<>();
+        if (sourceContent != null) {
+            for (ParsedModel.FieldInjectionDef field : model.fieldInjections()) {
+                if (!mentionsFieldUse(sourceContent, field.variableName())) continue;
+                String depFqn = typeFqnResolver.resolve(field.declaredType(), imports, ctx).fqn();
+                if (!isClassFqn(depFqn) || depFqn.equals(model.classFqn())) continue;
+                if (findLibraryTypeNode(depFqn).isPresent()) continue;
+
+                String depNodeId = GraphNodeIds.classNode(batch.serviceId(), depFqn);
+                nodeRepo.upsert(GraphNode.clazz(
+                        depNodeId, svc.orgId(), svc.repo(), svc.serviceName(), depFqn));
+                invokesEdges.add(GraphEdge.invokes(classNodeId, depNodeId));
+            }
+        }
+
+        List<GraphEdge> routesToEdges = new ArrayList<>();
+        RoutingRulePack.FactoryRoutingRule factoryMeta =
+                factoryMeta(model.classFqn(), routingRulePackLoader.getRulePack());
+        for (ParsedModel.FactoryRoutingDef route : model.factoryRouting()) {
+            String targetFqn = resolveTargetClassFqn(route, beanIndex, imports, ctx);
+            if (!isClassFqn(targetFqn)) continue;
+
+            String targetNodeId = GraphNodeIds.classNode(batch.serviceId(), targetFqn);
+            nodeRepo.upsert(GraphNode.clazz(
+                    targetNodeId, svc.orgId(), svc.repo(), svc.serviceName(), targetFqn));
+            routesToEdges.add(GraphEdge.routesTo(classNodeId, targetNodeId));
+
+            String selector = route.selectorMethod() != null
+                    ? route.selectorMethod()
+                    : factoryMeta != null ? factoryMeta.selectorMethod() : null;
+            String discriminator = route.discriminatorType() != null
+                    ? route.discriminatorType()
+                    : factoryMeta != null ? factoryMeta.discriminatorType() : null;
+            routingRows.add(new RoutingRow(
+                    model.classFqn(), selector, discriminator,
+                    route.routingKey(), route.targetBean(), targetFqn, route.fallback()));
+        }
+        edgeUpdater.replaceEdges(classNodeId, "ROUTES_TO", routesToEdges);
+
+        Map<String, List<GraphEdge>> methodInvokeEdges = new LinkedHashMap<>();
+        for (ParsedModel.MethodCallDef call : model.methodCalls()) {
+            if (!isClassFqn(call.calleeClassFqn())) continue;
+            if (findLibraryTypeNode(call.calleeClassFqn()).isPresent()) continue;
+
+            String methodFqn = model.classFqn() + "#" + call.callerMethod();
+            String methodNodeId = GraphNodeIds.methodNode(batch.serviceId(), model.classFqn(), call.callerMethod());
+            nodeRepo.upsert(GraphNode.method(
+                    methodNodeId, svc.orgId(), svc.repo(), svc.serviceName(), methodFqn));
+
+            String calleeNodeId = GraphNodeIds.classNode(batch.serviceId(), call.calleeClassFqn());
+            nodeRepo.upsert(GraphNode.clazz(
+                    calleeNodeId, svc.orgId(), svc.repo(), svc.serviceName(), call.calleeClassFqn()));
+
+            methodInvokeEdges.computeIfAbsent(methodNodeId, k -> new ArrayList<>())
+                    .add(GraphEdge.invokes(methodNodeId, calleeNodeId));
+            invokesEdges.add(GraphEdge.invokes(classNodeId, calleeNodeId));
+        }
+        for (Map.Entry<String, List<GraphEdge>> entry : methodInvokeEdges.entrySet()) {
+            edgeUpdater.replaceEdges(entry.getKey(), "INVOKES", entry.getValue());
+        }
+        edgeUpdater.replaceEdges(classNodeId, "INVOKES", dedupeEdges(invokesEdges));
+
         List<GraphEdge> outboundEdges = new ArrayList<>();
         for (ParsedModel.EndpointDef ep : model.endpoints()) {
             String endpointFqn = model.classFqn() + "#" + ep.methodName();
@@ -112,6 +211,101 @@ public class GraphFactProjector {
                             GraphEdge.outboundTo(classNodeId, targetId)));
         }
         edgeUpdater.replaceEdges(classNodeId, "OUTBOUND_TO", outboundEdges);
+    }
+
+    private static List<GraphEdge> dedupeEdges(List<GraphEdge> edges) {
+        Map<String, GraphEdge> deduped = new LinkedHashMap<>();
+        for (GraphEdge edge : edges) {
+            deduped.putIfAbsent(edge.fromNode() + "->" + edge.toNode(), edge);
+        }
+        return List.copyOf(deduped.values());
+    }
+
+    private void persistRoutingFacts(FactBatch batch, List<RoutingRow> rows) {
+        db.sql("""
+                DELETE FROM routing_table_facts
+                WHERE org_id = :orgId AND service_id = :serviceId AND commit_sha = :commitSha
+                """)
+                .param("orgId", batch.orgId())
+                .param("serviceId", batch.serviceId())
+                .param("commitSha", batch.commitSha())
+                .update();
+
+        if (rows.isEmpty()) {
+            return;
+        }
+
+        String sql = """
+                INSERT INTO routing_table_facts
+                  (org_id, repo, service_id, commit_sha, snapshot_type, factory_class_fqn,
+                   selector_method, discriminator_type, routing_key, target_bean, target_class_fqn,
+                   fallback, evidence_source, confidence)
+                VALUES (:orgId, :repo, :serviceId, :commitSha, :snapshotType, :factoryFqn,
+                        :selectorMethod, :discriminatorType, :routingKey, :targetBean, :targetFqn,
+                        :fallback, :evidenceSource, :confidence)
+                """;
+        for (RoutingRow row : rows) {
+            db.sql(sql)
+                    .param("orgId", batch.orgId())
+                    .param("repo", batch.repo())
+                    .param("serviceId", batch.serviceId())
+                    .param("commitSha", batch.commitSha())
+                    .param("snapshotType", batch.snapshotType())
+                    .param("factoryFqn", row.factoryClassFqn())
+                    .param("selectorMethod", row.selectorMethod())
+                    .param("discriminatorType", row.discriminatorType())
+                    .param("routingKey", row.routingKey())
+                    .param("targetBean", row.targetBean())
+                    .param("targetFqn", row.targetClassFqn())
+                    .param("fallback", row.fallback())
+                    .param("evidenceSource", "factory-routing")
+                    .param("confidence", 0.95)
+                    .update();
+        }
+    }
+
+    static Map<String, String> buildBeanIndex(List<ParsedModel> models, RoutingRulePack rulePack) {
+        Map<String, String> index = new HashMap<>();
+        for (RoutingRulePack.BeanLinkRule link : rulePack.beanLinks()) {
+            index.put(link.beanName(), link.classFqn());
+        }
+        for (ParsedModel model : models) {
+            if (model.componentBeanName() != null && model.classFqn() != null) {
+                index.putIfAbsent(model.componentBeanName(), model.classFqn());
+            }
+            if (model.classFqn() != null) {
+                String defaultBean = Character.toLowerCase(model.classFqn().charAt(
+                        model.classFqn().lastIndexOf('.') + 1))
+                        + simpleName(model.classFqn()).substring(1);
+                index.putIfAbsent(defaultBean, model.classFqn());
+            }
+        }
+        return index;
+    }
+
+    private String resolveTargetClassFqn(
+            ParsedModel.FactoryRoutingDef route,
+            Map<String, String> beanIndex,
+            ImportIndex imports,
+            TypeFqnResolver.CompilationContext ctx) {
+        if (route.targetBean() != null && beanIndex.containsKey(route.targetBean())) {
+            return beanIndex.get(route.targetBean());
+        }
+        if (route.targetClassFqn() != null && route.targetClassFqn().contains(".")) {
+            return route.targetClassFqn();
+        }
+        if (route.targetClassFqn() != null) {
+            return typeFqnResolver.resolve(route.targetClassFqn(), imports, ctx).fqn();
+        }
+        return null;
+    }
+
+    private static RoutingRulePack.FactoryRoutingRule factoryMeta(
+            String classFqn, RoutingRulePack rulePack) {
+        return rulePack.factoryRouting().stream()
+                .filter(r -> classFqn.equals(r.factoryFqn()))
+                .findFirst()
+                .orElse(null);
     }
 
     private void refreshServiceCallEdges(String serviceId, String serviceName) {
@@ -180,12 +374,38 @@ public class GraphFactProjector {
     }
 
     static String resolveTypeFqn(String typeName, String owningClassFqn) {
-        if (typeName == null || typeName.isBlank()) return "";
-        String cleaned = typeName.replaceAll("<.*>", "").trim();
-        if (cleaned.contains(".")) return cleaned;
-        int dot = owningClassFqn.lastIndexOf('.');
-        if (dot < 0) return cleaned;
-        return owningClassFqn.substring(0, dot + 1) + cleaned;
+        return TypeFqnResolver.samePackageFallback(typeName, owningClassFqn);
     }
 
+    private static String packageOf(String classFqn) {
+        int dot = classFqn != null ? classFqn.lastIndexOf('.') : -1;
+        return dot >= 0 ? classFqn.substring(0, dot) : "";
+    }
+
+    private static String simpleName(String classFqn) {
+        int dot = classFqn.lastIndexOf('.');
+        return dot >= 0 ? classFqn.substring(dot + 1) : classFqn;
+    }
+
+    private static boolean mentionsFieldUse(String content, String variableName) {
+        return content != null && variableName != null && content.contains(variableName + ".");
+    }
+
+    /** Reject parser noise (chained expressions, generics text) from becoming graph class nodes. */
+    static boolean isClassFqn(String fqn) {
+        if (fqn == null || fqn.isBlank() || fqn.length() > 500) {
+            return false;
+        }
+        return fqn.matches("[\\w.$]+");
+    }
+
+    private record RoutingRow(
+            String factoryClassFqn,
+            String selectorMethod,
+            String discriminatorType,
+            String routingKey,
+            String targetBean,
+            String targetClassFqn,
+            boolean fallback
+    ) {}
 }

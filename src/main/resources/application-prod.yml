@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: testseer-backend
+
+testseer:
+  observability:
+    json-logging: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus, metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  level:
+    io.testseer: INFO

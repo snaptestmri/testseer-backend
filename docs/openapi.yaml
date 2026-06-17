@@ -1,599 +1,3134 @@
-# TestSeer REST API — OpenAPI 3.0
-#
-# Prefer auto-generated output from a running server (includes full schemas):
-#   mvn test -Dtest=OpenApiExportTest          # requires Docker
-#   ./scripts/export-openapi.sh                # server on localhost:8080
-#   curl -s http://localhost:8080/v3/api-docs.yaml -o docs/openapi.yaml
-#
 openapi: 3.0.1
 info:
-  title: TestSeer API
-  description: |
-    TestSeer analyses Java service codebases to produce a structured
-    knowledge graph of classes, endpoints, and outbound HTTP calls.
-    Use the Query API to ask questions about your services — reachability,
-    impact analysis, shared type consumers — and always get freshness
-    metadata alongside results.
-  version: 0.1.0
   contact:
-    name: TestSeer Team
     email: team@testseer.io
+    name: TestSeer Team
+  description: "TestSeer analyses Java service codebases to produce a structured knowledge\
+    \ graph of classes, endpoints, and outbound HTTP calls. Use the Query API to ask\
+    \ questions about your services — reachability, impact analysis, shared type consumers\
+    \ — and always get freshness metadata alongside results."
   license:
     name: Proprietary
+  title: TestSeer API
+  version: 0.1.0
 servers:
-  - url: http://localhost:8080
-    description: Local development
+- description: Local development
+  url: http://localhost:8080
 tags:
-  - name: Service Registry
-    description: Register and manage services for TestSeer analysis
-  - name: Webhook
-    description: GitHub webhook receiver for push and pull_request events
-  - name: Admin — Indexing
-    description: Trigger on-demand indexing of Java services
-  - name: Admin — Discovery
-    description: Auto-register services by scanning a GitHub organisation
-  - name: Query — Facts
-    description: Retrieve indexed facts about classes and outbound HTTP calls
-  - name: Query — Graph
-    description: "Graph traversal queries: reachability, impact, neighbourhood, shared types"
-  - name: Query — Status
-    description: Service indexing freshness and metadata
-  - name: Analysis
-    description: Impact analysis and test planning based on the indexed knowledge graph
+- description: Auto-register services by scanning a GitHub organisation
+  name: Admin — Discovery
+- description: Trigger on-demand indexing of Java services
+  name: Admin — Indexing
+- description: Clear or rebuild indexed facts
+  name: Admin — Indexing
+- description: Replay failed ingestion jobs
+  name: Admin — Jobs
+- description: Org-scoped catalog library and service module configuration (CFG-CAT)
+  name: Admin — Workspace Catalog
+- description: Impact analysis and test planning based on the indexed knowledge graph
+  name: Analysis
+- description: Index-complete push for IDE clients (BL-024)
+  name: Notifications
+- description: Static consistency scenarios (CON Phase 1)
+  name: Query — Consistency Hints
+- description: Contract operation to inbound handler entry-flow trace (BL-046 P3)
+  name: Query — Contract Entry Flow
+- description: OpenAPI contract vs Java inbound REST reconciliation (BL-046 P2)
+  name: Query — Contract Gaps
+- description: Partner API contract inventory from riq-platform-apis-optimus (BL-046)
+  name: Query — Contract Operations
+- description: Persistence entity/document catalog from library indexes (WRK-18)
+  name: Query — Data Object Catalog
+- description: Catalog vs DDL drift report (WRK-23)
+  name: Query — Data Object Gaps
+- description: Inbound entry triggers and entry-flow trace (TRG P1)
+  name: Query — Entry Triggers
+- description: Retrieve indexed facts about classes and outbound HTTP calls
+  name: Query — Facts
+- description: "Graph traversal queries: reachability, impact, neighbourhood, shared\
+    \ types"
+  name: Query — Graph
+- description: Ingestion job lifecycle status
+  name: Query — Jobs
+- description: Maven module and artifact dependency facts (BL-058)
+  name: Query — Maven dependencies
+- description: "Pub/Sub inventory, event flow, gates, and validation hints (Option\
+    \ C)"
+  name: Query — Messaging Flow
+- description: Portfolio-wide indexing freshness summary
+  name: Query — Org Status
+- description: Test class gap detection (P12)
+  name: Query — Portfolio Gaps
+- description: Service indexing freshness and metadata
+  name: Query — Status
+- description: Register and manage services for TestSeer analysis
+  name: Service Registry
+- description: GitHub webhook receiver for push and pull_request events
+  name: Webhook
 paths:
+  /admin/discover:
+    post:
+      description: "Scans every non-archived, non-fork repository in the organisation.\
+        \ Repositories containing a pom.xml (MAVEN) or build.gradle (GRADLE) at the\
+        \ root are auto-registered in the service registry. Already-registered services\
+        \ are reported in alreadyKnown and are not modified. Non-Java repos are reported\
+        \ in skipped. Runs synchronously — large organisations may take several seconds."
+      operationId: discover
+      parameters:
+      - description: GitHub organisation login (e.g. 'acme')
+        in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DiscoveryResult"
+          description: Discovery complete
+        "400":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DiscoveryResult"
+          description: orgId parameter is missing
+      summary: Discover and register all Java services in a GitHub org
+      tags:
+      - Admin — Discovery
+  /admin/maven/backfill-links:
+    post:
+      description: |-
+        Re-runs InternalArtifactLinker against existing maven_dependency_facts for the latest
+        commit per service without a full re-index. Optionally syncs OWNED_BY graph edges.
+      operationId: backfillMavenLinks
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MavenLinkBackfillRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/MavenLinkBackfillResponse"
+          description: OK
+      summary: Backfill maven dependency linkedServiceId
+      tags:
+      - Admin — Maven
+  /admin/index/clear:
+    post:
+      description: |-
+        Removes indexed facts so you can re-index cleanly.
+        scope=SERVICE (default): all facts + graph for one serviceId.
+        scope=MESSAGING: Option C facts only (pubsub, schema, gates, etc.).
+        scope=ORG: all facts for orgId; set includeRegistry=true to also remove service_registry rows.
+        Does not delete shared TOPIC/SUBSCRIPTION graph nodes that other services may reference.
+      operationId: clear
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IndexClearRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/IndexClearResponse"
+          description: OK
+      summary: Clear indexed facts
+      tags:
+      - Admin — Indexing
+  /admin/index/local:
+    post:
+      description: "Indexes all `.java` files found recursively under the given server-accessible\
+        \ directory path. If the service is not yet registered, it is auto-registered\
+        \ using the directory name as the service name and detecting the build tool\
+        \ from `pom.xml` or `build.gradle`. The git commit SHA is resolved from the\
+        \ directory's git history; if the path is not a git repository, a `local-{epoch}`\
+        \ pseudo-SHA is used. Runs synchronously — returns when indexing is complete.\
+        \ Use `GET /v1/status/{serviceId}` to verify freshness afterwards."
+      operationId: trigger_1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocalIndexTriggerRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/LocalIndexTriggerResponse"
+          description: Indexing complete
+        "400":
+          content:
+            '*/*':
+              schema:
+                type: string
+                example: "Path is not a directory: /bad/path"
+          description: Path is not a directory or request fields are blank
+      summary: Index a local folder
+      tags:
+      - Admin — Indexing
+  /admin/index/{serviceId}:
+    delete:
+      operationId: clearServiceById
+      parameters:
+      - in: path
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/IndexClearResponse"
+          description: OK
+      summary: Clear indexed facts for one service (shortcut)
+      tags:
+      - Admin — Indexing
+    post:
+      description: "Fetches all .java files from GitHub using the Git Trees API and\
+        \ publishes an analysis job to Kafka. The job runs asynchronously — this endpoint\
+        \ returns immediately with a jobId. Track progress via GET /v1/status/{serviceId}.\
+        \ Returns 409 if a QUEUED or RUNNING job already exists for the service."
+      operationId: trigger
+      parameters:
+      - description: Unique service identifier
+        in: path
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IndexTriggerRequest"
+      responses:
+        "202":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/IndexTriggerResponse"
+          description: Job queued successfully
+        "404":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/IndexTriggerResponse"
+          description: Service not found
+        "409":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/IndexTriggerResponse"
+          description: A job is already in progress for this service
+      summary: Trigger on-demand indexing for a registered service
+      tags:
+      - Admin — Indexing
+  /admin/jobs/{jobId}/replay:
+    post:
+      description: Re-queues a new MANUAL index job for the same service and commit
+        as the DLQ job.
+      operationId: replay
+      parameters:
+      - in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+      responses:
+        "202":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/IndexTriggerResponse"
+          description: Replay job queued
+        "404":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/IndexTriggerResponse"
+          description: Job not found
+        "409":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/IndexTriggerResponse"
+          description: Job is not in DLQ status
+      summary: Replay a DLQ ingestion job
+      tags:
+      - Admin — Jobs
   /registry/services:
     get:
-      tags: [Service Registry]
-      summary: List all services
       description: Returns all registered services across all organisations.
-      operationId: listServices
+      operationId: listAll
       responses:
-        '200':
-          description: List of services
+        "200":
           content:
-            application/json:
+            '*/*':
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/ServiceEntry'
+                  $ref: "#/components/schemas/ServiceEntry"
+          description: List of services
+      summary: List all services
+      tags:
+      - Service Registry
     post:
-      tags: [Service Registry]
-      summary: Register a service
       description: Registers a new service for indexing. Returns the assigned serviceId.
-      operationId: registerService
+      operationId: register
       requestBody:
-        required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RegistrationRequest'
+              $ref: "#/components/schemas/RegistrationRequest"
+        required: true
       responses:
-        '201':
+        "201":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ServiceEntry"
           description: Service registered successfully
+        "400":
           content:
-            application/json:
+            '*/*':
               schema:
-                $ref: '#/components/schemas/ServiceEntry'
-        '400':
+                $ref: "#/components/schemas/ServiceEntry"
           description: Invalid registration request
+      summary: Register a service
+      tags:
+      - Service Registry
   /registry/services/{serviceId}:
-    get:
-      tags: [Service Registry]
-      summary: Get a service by ID
-      operationId: getServiceById
-      parameters:
-        - $ref: '#/components/parameters/serviceIdPath'
-      responses:
-        '200':
-          description: Service found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ServiceEntry'
-        '404':
-          description: Service not found
-    patch:
-      tags: [Service Registry]
-      summary: Update service metadata
-      operationId: updateService
-      parameters:
-        - $ref: '#/components/parameters/serviceIdPath'
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RegistryUpdateRequest'
-      responses:
-        '200':
-          description: Service updated
     delete:
-      tags: [Service Registry]
-      summary: Disable a service
-      description: Disables a service, stopping future indexing jobs.
-      operationId: disableService
+      description: "Disables a service, stopping future indexing jobs."
+      operationId: disable
       parameters:
-        - $ref: '#/components/parameters/serviceIdPath'
+      - description: Unique service identifier
+        in: path
+        name: serviceId
+        required: true
+        schema:
+          type: string
       responses:
-        '204':
+        "204":
           description: Service disabled
-  /webhook/github:
-    post:
-      tags: [Webhook]
-      summary: Receive GitHub webhook events
-      description: Handles push and pull_request events to trigger indexing jobs.
-      operationId: githubWebhook
+      summary: Disable a service
+      tags:
+      - Service Registry
+    get:
+      operationId: getById
       parameters:
-        - name: X-GitHub-Event
-          in: header
-          required: true
-          schema:
-            type: string
-        - name: X-Hub-Signature-256
-          in: header
-          schema:
-            type: string
-      requestBody:
+      - description: Unique service identifier
+        in: path
+        name: serviceId
         required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ServiceEntry"
+          description: Service found
+        "404":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ServiceEntry"
+          description: Service not found
+      summary: Get a service by ID
+      tags:
+      - Service Registry
+    patch:
+      operationId: update
+      parameters:
+      - description: Unique service identifier
+        in: path
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      requestBody:
         content:
           application/json:
             schema:
-              type: object
-      responses:
-        '202':
-          description: Event accepted
-        '400':
-          description: Invalid payload or signature
-  /admin/index/{serviceId}:
-    post:
-      tags: [Admin — Indexing]
-      summary: Trigger GitHub re-index for a service
-      operationId: triggerIndex
-      parameters:
-        - $ref: '#/components/parameters/serviceIdPath'
-      responses:
-        '202':
-          description: Index job accepted
-        '404':
-          description: Service not found
-  /admin/index/local:
-    post:
-      tags: [Admin — Indexing]
-      summary: Index from local filesystem
-      description: Indexes all Java files in a server-accessible directory.
-      operationId: triggerLocalIndex
-      requestBody:
+              $ref: "#/components/schemas/RegistryUpdateRequest"
         required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/LocalIndexTriggerRequest'
       responses:
-        '202':
-          description: Local index job accepted
+        "200":
           content:
-            application/json:
+            '*/*':
               schema:
-                $ref: '#/components/schemas/LocalIndexTriggerResponse'
-        '400':
-          description: Invalid request
-  /admin/discover:
-    post:
-      tags: [Admin — Discovery]
-      summary: Discover and register all Java services in a GitHub org
-      description: |
-        Scans every non-archived, non-fork repository in the organisation.
-        Repositories containing pom.xml (MAVEN) or build.gradle (GRADLE) at the
-        root are auto-registered. Already-registered services appear in alreadyKnown.
-      operationId: discoverServices
+                $ref: "#/components/schemas/ServiceEntry"
+          description: Service updated
+      summary: Update service metadata
+      tags:
+      - Service Registry
+  /v1/catalog/data-objects:
+    get:
+      operationId: getDataObjects
       parameters:
-        - name: orgId
-          in: query
-          required: true
-          description: GitHub organisation login (e.g. acme)
-          schema:
-            type: string
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: storeType
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: physicalName
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          format: int32
+      - in: query
+        name: offset
+        required: false
+        schema:
+          type: integer
+          format: int32
       responses:
-        '200':
-          description: Discovery complete
+        "200":
           content:
-            application/json:
+            '*/*':
               schema:
-                $ref: '#/components/schemas/DiscoveryResult'
-        '400':
-          description: orgId parameter is missing
-  /v1/status/{serviceId}:
+                $ref: "#/components/schemas/ResponseEnvelopePageResultDataObjectView"
+          description: OK
+      summary: Data object catalog (entity/document → store → physical name)
+      tags:
+      - Query — Data Object Catalog
+  /v1/catalog/schema-objects:
     get:
-      tags: [Query — Status]
-      summary: Get indexing status for a service
-      operationId: getServiceStatus
+      operationId: getSchemaObjects
       parameters:
-        - $ref: '#/components/parameters/serviceIdPath'
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: storeType
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: physicalName
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          format: int32
+      - in: query
+        name: offset
+        required: false
+        schema:
+          type: integer
+          format: int32
       responses:
-        '200':
-          description: Status returned
+        "200":
           content:
-            application/json:
+            '*/*':
               schema:
-                $ref: '#/components/schemas/ResponseEnvelope'
-        '404':
-          description: Service not found
-  /v1/facts/class:
+                $ref: "#/components/schemas/ResponseEnvelopePageResultSchemaObjectView"
+          description: OK
+      summary: DDL schema objects indexed from riq-platform-db (Phase 5)
+      tags:
+      - Query — Data Object Catalog
+  /v1/consistency/scenarios:
     get:
-      tags: [Query — Facts]
-      summary: Get symbol facts for a class
-      description: |
-        Returns all indexed symbol facts for the given class FQN within a service.
-        Results are Redis-cached. Returns 404 if never indexed, 202 if indexing in progress.
-      operationId: getClassFacts
+      operationId: getScenarios
       parameters:
-        - $ref: '#/components/parameters/serviceId'
-        - name: symbolFqn
-          in: query
-          required: true
-          description: Fully-qualified class name, e.g. com.example.OrdersController
-          schema:
-            type: string
-        - $ref: '#/components/parameters/orgId'
-        - $ref: '#/components/parameters/repo'
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: pattern
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: flowStep
+        required: false
+        schema:
+          type: string
       responses:
-        '200':
-          description: Facts returned
-        '202':
-          description: Indexing in progress
-        '404':
-          description: Service not indexed
-  /v1/facts/outbound:
-    get:
-      tags: [Query — Facts]
-      summary: Get outbound HTTP call facts
-      operationId: getOutboundFacts
-      parameters:
-        - $ref: '#/components/parameters/serviceId'
-        - $ref: '#/components/parameters/orgId'
-        - $ref: '#/components/parameters/repo'
-        - name: sourceSymbol
-          in: query
-          required: false
-          description: Filter by caller class FQN
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Outbound call facts returned
-        '202':
-          description: Indexing in progress
-        '404':
-          description: Service not indexed
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListConsistencyScenarioView"
+          description: OK
+      summary: "Consistency scenarios for a service (mirror, dual-write, rule pack)"
+      tags:
+      - Query — Consistency Hints
   /v1/facts/by-file:
     get:
-      tags: [Query — Facts]
-      summary: Get symbol facts for specific file paths
-      description: |
-        Returns indexed CLASS and ENDPOINT symbols for the given file paths.
-        Used by the MCP server to map GitHub PR changed files to indexed endpoints.
-      operationId: getFactsByFile
+      description: "Returns all indexed symbols (CLASS, ENDPOINT) for the given file\
+        \ paths within a service. Used by the MCP server to map GitHub PR changed\
+        \ files to their indexed endpoints and classes."
+      operationId: getByFile
       parameters:
-        - $ref: '#/components/parameters/serviceId'
-        - name: filePaths
-          in: query
-          required: false
-          description: File paths to look up (repeat parameter for multiple paths)
-          schema:
-            type: array
-            items:
-              type: string
-          style: form
-          explode: true
-        - $ref: '#/components/parameters/orgId'
-        - $ref: '#/components/parameters/repo'
-      responses:
-        '200':
-          description: Symbols found (may be empty)
-        '404':
-          description: Service not indexed
-  /v1/graph/reachability:
-    get:
-      tags: [Query — Graph]
-      summary: Forward reachability
-      description: Which services or classes does this node transitively call?
-      operationId: graphReachability
-      parameters:
-        - $ref: '#/components/parameters/serviceId'
-        - name: type
-          in: query
-          schema:
+      - description: Service identifier
+        in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - description: File paths to look up
+        in: query
+        name: filePaths
+        required: false
+        schema:
+          type: array
+          items:
             type: string
-            enum: [service, class]
-            default: service
-          description: Traversal type
-        - $ref: '#/components/parameters/orgId'
-        - $ref: '#/components/parameters/repo'
+      - description: Organisation ID
+        in: query
+        name: orgId
+        required: false
+        schema:
+          type: string
+          default: acme
+      - description: Repository name
+        in: query
+        name: repo
+        required: false
+        schema:
+          type: string
+          default: ""
       responses:
-        '200':
-          description: Reachability result
-        '202':
-          description: Indexing in progress
-        '404':
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListSymbolFactView"
+          description: Symbols found (may be empty if files not indexed)
+        "404":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListSymbolFactView"
           description: Service not indexed
+      summary: Get symbol facts for specific file paths
+      tags:
+      - Query — Facts
+  /v1/facts/class:
+    get:
+      description: "Returns all indexed symbol facts for the given class FQN within\
+        \ a service. Results are Redis-cached. Returns 404 if the service has never\
+        \ been indexed, 202 if indexing is currently in progress."
+      operationId: getClassFacts
+      parameters:
+      - description: Service identifier
+        in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - description: "Fully-qualified class name, e.g. com.example.OrdersController"
+        in: query
+        name: symbolFqn
+        required: true
+        schema:
+          type: string
+      - description: Organisation ID
+        in: query
+        name: orgId
+        required: false
+        schema:
+          type: string
+          default: acme
+      - description: Repository name
+        in: query
+        name: repo
+        required: false
+        schema:
+          type: string
+          default: ""
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListSymbolFactView"
+          description: Facts returned
+        "202":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListSymbolFactView"
+          description: Indexing in progress — stale data may be returned
+        "404":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListSymbolFactView"
+          description: Service not indexed
+      summary: Get symbol facts for a class
+      tags:
+      - Query — Facts
+  /v1/facts/contract-operations:
+    get:
+      description: "OpenAPI operations indexed from riq-platform-apis-optimus. Filter\
+        \ by catalog library serviceId or implementing serviceId, optional specDomain."
+      operationId: getContractOperations
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: specDomain
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListContractOperationView"
+          description: OK
+      summary: Partner API contract operations
+      tags:
+      - Query — Contract Operations
+  /v1/facts/contract-operations/linked:
+    get:
+      description: Same as contract-operations plus linked inbound handler when implementation
+        is indexed.
+      operationId: getLinkedContractOperations
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: specDomain
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListContractOperationLinkedView"
+          description: OK
+      summary: Contract operations with entry-trigger links
+      tags:
+      - Query — Contract Entry Flow
+  /v1/facts/contract-schemas:
+    get:
+      description: "JSON schema summaries indexed from riq-platform-apis-optimus,\
+        \ including nested field paths."
+      operationId: getContractSchemas
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: schemaId
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListContractSchemaView"
+          description: OK
+      summary: Partner API contract JSON schemas
+      tags:
+      - Query — Contract Operations
+  /v1/facts/data-access:
+    get:
+      operationId: getDataAccess
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListDataAccessView"
+          description: OK
+      summary: Data access facts along event handlers (C-P3)
+      tags:
+      - Query — Messaging Flow
+  /v1/facts/entry-triggers:
+    get:
+      description: REST/webhook ingress points that can start processing in a service.
+      operationId: getEntryTriggers
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: env
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: triggerKind
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: actor
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: boundary
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: orgId
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: serviceModuleId
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: sourceRootPrefix
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: packagePrefix
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: includeWiring
+        required: false
+        schema:
+          type: boolean
+          default: false
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListEntryTriggerView"
+          description: OK
+      summary: Inbound entry trigger inventory
+      tags:
+      - Query — Entry Triggers
+  /v1/facts/external-endpoints:
+    get:
+      description: "Returns config-resolved external and internal partner HTTP targets\
+        \ (e.g. Hyvee LMS notify URL, OIS partnerpublishingdetails). Filter by env\
+        \ lane, partner slug, or flow step."
+      operationId: getExternalEndpoints
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: orgId
+        required: false
+        schema:
+          type: string
+          default: acme
+      - in: query
+        name: repo
+        required: false
+        schema:
+          type: string
+          default: ""
+      - in: query
+        name: env
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: partner
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: flowStep
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListExternalEndpointFactView"
+          description: External endpoint facts returned
+        "202":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListExternalEndpointFactView"
+          description: Indexing in progress
+        "404":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListExternalEndpointFactView"
+          description: Service not indexed
+      summary: Get external/partner HTTP endpoint facts for a service
+      tags:
+      - Query — Facts
+  /v1/facts/gates:
+    get:
+      operationId: getGates
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: env
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: flowStep
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: refreshLive
+        required: false
+        schema:
+          type: boolean
+          default: false
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListFlowGateView"
+          description: OK
+      summary: Flow gate and config facts (C-P6)
+      tags:
+      - Query — Messaging Flow
+  /v1/facts/maven-dependencies:
+    get:
+      operationId: mavenDependencies
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: orgId
+        required: false
+        schema:
+          type: string
+          default: acme
+      - in: query
+        name: repo
+        required: false
+        schema:
+          type: string
+          default: ""
+      - in: query
+        name: modulePath
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: scope
+        required: false
+        schema:
+          type: string
+          default: runtime
+      - in: query
+        name: directOnly
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - in: query
+        name: groupId
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: artifactId
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeMavenDependenciesReport"
+          description: OK
+      summary: Maven dependency facts for a service
+      tags:
+      - Query — Maven dependencies
+  /v1/facts/message-schema:
+    get:
+      operationId: getMessageSchemas
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: topicShortId
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListMessageSchemaView"
+          description: OK
+      summary: Message schema facts (C-P2)
+      tags:
+      - Query — Messaging Flow
+  /v1/facts/outbound:
+    get:
+      description: "Returns all detected outbound HTTP calls made by the service.\
+        \ Includes RestClient/WebClient chain calls, RestTemplate explicit methods,\
+        \ and FeignClient interface declarations. `httpMethod` and `path` are null\
+        \ when only client field presence was detected (e.g. a dynamic URI in a variable).\
+        \ Optionally filtered to a single caller class."
+      operationId: getOutboundFacts
+      parameters:
+      - description: Service identifier
+        in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - description: Organisation ID
+        in: query
+        name: orgId
+        required: false
+        schema:
+          type: string
+          default: acme
+      - description: Repository name
+        in: query
+        name: repo
+        required: false
+        schema:
+          type: string
+          default: ""
+      - description: Filter by caller class FQN (optional)
+        in: query
+        name: sourceSymbol
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListOutboundCallView"
+          description: Outbound call facts returned
+        "202":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListOutboundCallView"
+          description: Indexing in progress
+        "404":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListOutboundCallView"
+          description: Service not indexed
+      summary: Get outbound HTTP call facts for a service
+      tags:
+      - Query — Facts
+  /v1/facts/pubsub:
+    get:
+      operationId: getPubSubInventory
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: env
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: shortId
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: role
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: liveVerify
+        required: false
+        schema:
+          type: boolean
+          default: false
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListPubSubView"
+          description: OK
+      summary: Pub/Sub resource inventory (C-P1)
+      tags:
+      - Query — Messaging Flow
+  /v1/facts/pubsub/org:
+    get:
+      operationId: getOrgPubSubInventory
+      parameters:
+      - in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: env
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: resourceKind
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: role
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: liveVerify
+        required: false
+        schema:
+          type: boolean
+          default: false
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListPubSubOrgView"
+          description: OK
+      summary: Org-wide Pub/Sub inventory for cross-repo flows
+      tags:
+      - Query — Messaging Flow
+  /v1/facts/validation-hints:
+    get:
+      operationId: getValidationHints
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: env
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: flowStep
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListValidationHintView"
+          description: OK
+      summary: Validation hints for test plan Expected columns (C-P4)
+      tags:
+      - Query — Messaging Flow
+  /v1/gaps:
+    get:
+      operationId: getGaps
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeGapReport"
+          description: OK
+      summary: Portfolio test gaps — production classes without matching test class
+      tags:
+      - Query — Portfolio Gaps
+  /v1/gaps/consistency:
+    get:
+      operationId: getConsistencyGaps
+      parameters:
+      - in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListConsistencyGapView"
+          description: OK
+      summary: "Consistency scenario gaps — undocumented dual-writes, orphan rules,\
+        \ unlinked mirrors"
+      tags:
+      - Query — Data Object Gaps
+  /v1/gaps/contract:
+    get:
+      description: "Compares riq-platform-apis-optimus operations to indexed inbound\
+        \ REST handlers. Gap types: CONTRACT_ONLY (documented, not implemented), IMPLEMENTATION_ONLY\
+        \ (handler, not in contract)."
+      operationId: getContractGaps
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: specDomain
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListContractGapView"
+          description: OK
+      summary: Contract vs implementation gaps
+      tags:
+      - Query — Contract Gaps
+  /v1/gaps/contract-test-coverage:
+    get:
+      description: "Compares OpenAPI contract operations to HTTP calls extracted from\
+        \ riq-qa-REST-Assured. Gap types: CONTRACT_UNTESTED, TEST_UNDOCUMENTED."
+      operationId: getContractTestCoverageGaps
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: testServiceId
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: specDomain
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListContractTestCoverageGapView"
+          description: OK
+      summary: Contract vs REST-Assured test coverage gaps
+      tags:
+      - Query — Contract Gaps
+  /v1/gaps/data-objects:
+    get:
+      operationId: getDataObjectGaps
+      parameters:
+      - in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListDataObjectGapView"
+          description: OK
+      summary: Data object catalog drift vs DDL
+      tags:
+      - Query — Data Object Gaps
+  /v1/gaps/messaging:
+    get:
+      operationId: getMessagingGaps
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: env
+        required: false
+        schema:
+          type: string
+          default: pdn
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeEventFlowReport"
+          description: OK
+      summary: Messaging flow gap report (C-P5)
+      tags:
+      - Query — Messaging Flow
+  /v1/graph/contract-entry-flow:
+    get:
+      description: Resolves OpenAPI operation → implementing service inbound trigger
+        → handler data access and gates.
+      operationId: traceContractEntryFlow
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: operationId
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: specDomain
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: httpMethod
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: path
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: env
+        required: false
+        schema:
+          type: string
+          default: unknown
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeContractEntryFlowReport"
+          description: OK
+      summary: Trace entry flow from a contract operation
+      tags:
+      - Query — Contract Entry Flow
+  /v1/graph/cross-service-boundary:
+    get:
+      description: Services reached when crossing service boundaries from the given
+        node.
+      operationId: crossServiceBoundary
+      parameters:
+      - description: Graph node ID
+        in: query
+        name: nodeId
+        required: true
+        schema:
+          type: string
+      - description: Service identifier for freshness check
+        in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeReachabilityResult"
+          description: OK
+      summary: Cross-service boundary traversal
+      tags:
+      - Query — Graph
+  /v1/graph/dependency-tree:
+    get:
+      operationId: dependencyTree
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: orgId
+        required: false
+        schema:
+          type: string
+          default: acme
+      - in: query
+        name: repo
+        required: false
+        schema:
+          type: string
+          default: ""
+      - in: query
+        name: modulePath
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: scope
+        required: false
+        schema:
+          type: string
+          default: runtime
+      - in: query
+        name: depth
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 3
+      - in: query
+        name: hydrate
+        required: false
+        schema:
+          type: boolean
+          default: true
+      - in: query
+        name: includeExternal
+        required: false
+        schema:
+          type: boolean
+          default: true
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeDependencyTreeResult"
+          description: OK
+      summary: Maven dependency tree with optional graph hydration
+      tags:
+      - Query — Maven dependencies
+  /v1/graph/entry-flow:
+    get:
+      description: "Forward walk from triggerId or HTTP path through handler data\
+        \ access, flow gates, optional Option C messaging hops, cross-repo trace,\
+        \ and outbound external endpoints (TRG-12)."
+      operationId: traceEntryFlow
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: triggerId
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: path
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: env
+        required: false
+        schema:
+          type: string
+          default: unknown
+      - in: query
+        name: includeMessaging
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - in: query
+        name: includeExternal
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - in: query
+        name: crossRepo
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - in: query
+        name: orgId
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: maxHops
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 12
+      - in: query
+        name: serviceModuleId
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: sourceRootPrefix
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: includeWiring
+        required: false
+        schema:
+          type: boolean
+          default: false
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeEntryFlowReport"
+          description: OK
+      summary: Trace flow from an inbound entry trigger
+      tags:
+      - Query — Entry Triggers
+  /v1/graph/entry-flow/impact:
+    get:
+      description: Lists entry triggers that fan in to handlerFqn (reverse TRIGGERED_BY).
+        Org-wide by default; optional serviceId narrows scope.
+      operationId: entryFlowImpact
+      parameters:
+      - in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: handlerFqn
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: serviceId
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: env
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeEntryTriggerImpactReport"
+          description: OK
+      summary: "Reverse impact: inbound triggers for a changed handler"
+      tags:
+      - Query — Entry Triggers
+  /v1/graph/event-flow:
+    get:
+      operationId: traceEventFlow
+      parameters:
+      - in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: shortId
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: env
+        required: false
+        schema:
+          type: string
+          default: pdn
+      - in: query
+        name: includeExternal
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - in: query
+        name: liveVerify
+        required: false
+        schema:
+          type: boolean
+          default: false
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeEventFlowReport"
+          description: OK
+      summary: "Trace topic through publishers, schemas, DB, gates (C-P2/P4/P6)"
+      tags:
+      - Query — Messaging Flow
+  /v1/graph/event-flow/cross-repo:
+    get:
+      operationId: traceCrossRepoFlow
+      parameters:
+      - in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: shortId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: env
+        required: false
+        schema:
+          type: string
+          default: pdn
+      - in: query
+        name: maxHops
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 12
+      - in: query
+        name: bundle
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: includeExternal
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - in: query
+        name: liveVerify
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - in: query
+        name: followMode
+        required: false
+        schema:
+          type: string
+          default: runtime
+      - in: query
+        name: includeManifest
+        required: false
+        schema:
+          type: boolean
+          default: false
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeCrossRepoFlowReport"
+          description: OK
+      summary: Trace topic across all indexed services in an org (cross-repo)
+      tags:
+      - Query — Messaging Flow
+  /v1/graph/flow-diagram:
+    get:
+      description: "Composed ingress → orchestration → routing → messaging exits view\
+        \ (BL-054). Anchor: triggerId:|handlerFqn:|symbolFqn:|nodeId:. Use packagePrefix\
+        \ to scope consumer module. format=mermaid for Mermaid text."
+      operationId: flowDiagram
+      parameters:
+      - description: Service identifier
+        in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - description: "Anchor: triggerId:|handlerFqn:|symbolFqn:|nodeId:"
+        in: query
+        name: anchor
+        required: true
+        schema:
+          type: string
+      - description: Organisation ID
+        in: query
+        name: orgId
+        required: false
+        schema:
+          type: string
+          default: quotient
+      - description: Java package prefix filter
+        in: query
+        name: packagePrefix
+        required: false
+        schema:
+          type: string
+      - description: Transitive expansion depth
+        in: query
+        name: depth
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 6
+      - description: Include messaging egress hops
+        in: query
+        name: includeMessaging
+        required: false
+        schema:
+          type: boolean
+          default: true
+      - description: Include external domain actors
+        in: query
+        name: includeExternalDomain
+        required: false
+        schema:
+          type: boolean
+          default: true
+      - description: Include gate labels
+        in: query
+        name: includeGates
+        required: false
+        schema:
+          type: boolean
+          default: true
+      - description: "Response format: json or mermaid"
+        in: query
+        name: format
+        required: false
+        schema:
+          type: string
+          default: json
+      - description: Repository name
+        in: query
+        name: repo
+        required: false
+        schema:
+          type: string
+          default: ""
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeFlowDiagramResult"
+          description: OK
+      summary: Service flow diagram composer
+      tags:
+      - Query — Graph
   /v1/graph/impact:
     get:
-      tags: [Query — Graph]
-      summary: Reverse reachability (impact analysis)
       description: Which services or classes would be impacted if this node changes?
-      operationId: graphImpact
+        Traverses edges in reverse.
+      operationId: impact
       parameters:
-        - name: nodeId
-          in: query
-          required: true
-          description: Graph node ID
-          schema:
-            type: string
-        - $ref: '#/components/parameters/serviceId'
-        - $ref: '#/components/parameters/orgId'
-        - $ref: '#/components/parameters/repo'
+      - description: Graph node ID
+        in: query
+        name: nodeId
+        required: true
+        schema:
+          type: string
+      - description: Organisation ID
+        in: query
+        name: orgId
+        required: false
+        schema:
+          type: string
+          default: acme
+      - description: Repository name
+        in: query
+        name: repo
+        required: false
+        schema:
+          type: string
+          default: ""
+      - description: Service identifier for freshness check
+        in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
       responses:
-        '200':
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeReachabilityResult"
           description: Impact result
-        '404':
+        "404":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeReachabilityResult"
           description: Node not indexed
+      summary: Reverse reachability (impact analysis)
+      tags:
+      - Query — Graph
   /v1/graph/neighborhood:
     get:
-      tags: [Query — Graph]
-      summary: Immediate neighbourhood
-      description: Returns all direct (depth-1) neighbours of the given node.
-      operationId: graphNeighborhood
+      description: Returns all direct (depth-1) neighbours of the given node — both
+        inbound and outbound edges.
+      operationId: neighborhood
       parameters:
-        - name: nodeId
-          in: query
-          required: true
-          schema:
-            type: string
-        - $ref: '#/components/parameters/serviceId'
-        - $ref: '#/components/parameters/orgId'
-        - $ref: '#/components/parameters/repo'
+      - description: Graph node ID
+        in: query
+        name: nodeId
+        required: false
+        schema:
+          type: string
+      - description: Class FQN — resolved to class node when nodeId omitted
+        in: query
+        name: symbolFqn
+        required: false
+        schema:
+          type: string
+      - description: Organisation ID
+        in: query
+        name: orgId
+        required: false
+        schema:
+          type: string
+          default: acme
+      - description: Repository name
+        in: query
+        name: repo
+        required: false
+        schema:
+          type: string
+          default: ""
+      - description: Service identifier for freshness check
+        in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
       responses:
-        '200':
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeReachabilityResult"
           description: Neighbourhood result
-        '404':
+        "404":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeReachabilityResult"
           description: Node not indexed
+      summary: Immediate neighbourhood
+      tags:
+      - Query — Graph
+  /v1/graph/reachability:
+    get:
+      description: "Which services, classes, or methods does this node transitively\
+        \ reach? Use `type=service` for service call graph, `type=class` for class\
+        \ graph, `type=method` for method-level INVOKES/ROUTES_TO. Pass `symbolFqn`\
+        \ or `nodeId` for class/method anchors (not bare serviceId UUID)."
+      operationId: reachability
+      parameters:
+      - description: Service identifier
+        in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - description: "Traversal type: `service` (default), `class`, or `method`"
+        in: query
+        name: type
+        required: false
+        schema:
+          type: string
+          default: service
+      - description: Graph node ID (class/method/service)
+        in: query
+        name: nodeId
+        required: false
+        schema:
+          type: string
+      - description: Class FQN — resolved to class node when nodeId omitted
+        in: query
+        name: symbolFqn
+        required: false
+        schema:
+          type: string
+      - description: Method name with symbolFqn — builds method node id
+        in: query
+        name: methodName
+        required: false
+        schema:
+          type: string
+      - description: Max depth for method traversal (default 6)
+        in: query
+        name: depth
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 6
+      - description: Organisation ID
+        in: query
+        name: orgId
+        required: false
+        schema:
+          type: string
+          default: acme
+      - description: Repository name
+        in: query
+        name: repo
+        required: false
+        schema:
+          type: string
+          default: ""
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeReachabilityResult"
+          description: Reachability result
+        "202":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeReachabilityResult"
+          description: Indexing in progress
+        "400":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeReachabilityResult"
+          description: Missing node anchor for class/method traversal
+        "404":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeReachabilityResult"
+          description: Service not indexed
+      summary: Forward reachability
+      tags:
+      - Query — Graph
+  /v1/graph/routing:
+    get:
+      description: Runtime dispatch table from Spring factory classes (e.g. ProcessorFactory
+        → TxnEvalProcessors).
+      operationId: routing
+      parameters:
+      - description: Service identifier
+        in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - description: Factory class FQN filter
+        in: query
+        name: factoryFqn
+        required: false
+        schema:
+          type: string
+      - description: Organisation ID
+        in: query
+        name: orgId
+        required: false
+        schema:
+          type: string
+          default: acme
+      - description: Repository name
+        in: query
+        name: repo
+        required: false
+        schema:
+          type: string
+          default: ""
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeRoutingReport"
+          description: OK
+      summary: Factory processor routing table
+      tags:
+      - Query — Graph
   /v1/graph/shared-type:
     get:
-      tags: [Query — Graph]
-      summary: Shared type resolution
-      description: Which services use this shared library type?
-      operationId: graphSharedType
+      description: Which services use this shared library type? Always returns CURRENT
+        — shared types do not have their own analysis runs.
+      operationId: sharedType
       parameters:
-        - name: symbolFqn
-          in: query
-          required: true
-          description: Fully-qualified type name
-          schema:
-            type: string
+      - description: Fully-qualified type name
+        in: query
+        name: symbolFqn
+        required: true
+        schema:
+          type: string
       responses:
-        '200':
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeReachabilityResult"
           description: Services using this type
+      summary: Shared type resolution
+      tags:
+      - Query — Graph
   /v1/graph/type-fanout:
     get:
-      tags: [Query — Graph]
-      summary: Type fanout
-      description: All consumers of a shared library type across the graph.
-      operationId: graphTypeFanout
+      description: All consumers of a given type across the entire codebase. Always
+        returns CURRENT.
+      operationId: typeFanOut
       parameters:
-        - name: symbolFqn
-          in: query
-          required: true
-          schema:
-            type: string
+      - description: Fully-qualified type name
+        in: query
+        name: symbolFqn
+        required: true
+        schema:
+          type: string
       responses:
-        '200':
-          description: Fanout result
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeReachabilityResult"
+          description: Type consumers
+      summary: Type usage fan-out
+      tags:
+      - Query — Graph
   /v1/impact/pr:
     get:
-      tags: [Analysis]
-      summary: PR impact analysis
-      description: |
-        Given a service and commit SHA, returns changed symbols, upstream callers,
-        downstream dependencies, and suggested test scope. Returns 404 if the
-        service or commit has never been indexed.
+      description: "Given a service and commit SHA, returns the symbols changed at\
+        \ that commit, which upstream services are affected, downstream dependencies,\
+        \ and suggested test scope. Returns 404 if the service or commit has never\
+        \ been indexed."
       operationId: prImpact
       parameters:
-        - $ref: '#/components/parameters/serviceId'
-        - name: commitSha
-          in: query
-          required: true
-          description: Git commit SHA to analyse
-          schema:
-            type: string
-        - $ref: '#/components/parameters/orgId'
-        - $ref: '#/components/parameters/repo'
+      - description: Service identifier
+        in: query
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      - description: Git commit SHA to analyse
+        in: query
+        name: commitSha
+        required: true
+        schema:
+          type: string
+      - description: Organisation ID
+        in: query
+        name: orgId
+        required: false
+        schema:
+          type: string
+          default: acme
+      - description: Repository name
+        in: query
+        name: repo
+        required: false
+        schema:
+          type: string
+          default: ""
       responses:
-        '200':
-          description: Impact report generated
+        "200":
           content:
-            application/json:
+            '*/*':
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/ResponseEnvelope'
-                  - type: object
-                    properties:
-                      data:
-                        $ref: '#/components/schemas/ImpactReport'
-        '202':
-          description: Indexing in progress
-        '400':
+                $ref: "#/components/schemas/ResponseEnvelopeImpactReport"
+          description: Impact report generated
+        "202":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeImpactReport"
+          description: Indexing in progress — report may be stale
+        "400":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeImpactReport"
           description: Required parameter missing
-        '404':
+        "404":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeImpactReport"
           description: Service or commit not indexed
+      summary: PR impact analysis
+      tags:
+      - Analysis
+  /v1/jobs/{jobId}:
+    get:
+      description: Returns analysis_runs lifecycle fields for observability and debugging.
+      operationId: getJob
+      parameters:
+      - in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/JobStatusResponse"
+          description: Job found
+        "404":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/JobStatusResponse"
+          description: Job not found
+      summary: Get ingestion job status by jobId
+      tags:
+      - Query — Jobs
+  /v1/notifications/index-events:
+    get:
+      operationId: indexEvents
+      parameters:
+      - in: query
+        name: serviceId
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/SseEmitter"
+          description: OK
+      summary: SSE stream of index-complete events
+      tags:
+      - Notifications
+  /v1/notifications/index-events/poll:
+    get:
+      operationId: pollIndexEvents
+      parameters:
+      - in: query
+        name: serviceId
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: after
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 50
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeListIndexCompleteEvent"
+          description: OK
+      summary: Long-poll fallback for index-complete events
+      tags:
+      - Notifications
   /v1/services/{serviceId}/description:
     get:
-      tags: [Analysis]
+      operationId: getDescription
+      parameters:
+      - in: path
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ServiceDescriptionResponse"
+          description: Description returned
+        "404":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ServiceDescriptionResponse"
+          description: No description stored yet
       summary: Get cached business description for a service
-      operationId: getServiceDescription
+      tags:
+      - Analysis
+  /v1/status:
+    get:
+      description: Lists registered services with freshness status and latest job
+        metadata.
+      operationId: orgStatus
       parameters:
-        - $ref: '#/components/parameters/serviceIdPath'
+      - description: Filter by organization id
+        in: query
+        name: orgId
+        required: false
+        schema:
+          type: string
       responses:
-        '200':
-          description: Description text
+        "200":
           content:
-            text/plain:
+            '*/*':
               schema:
-                type: string
-        '404':
-          description: No description generated yet
-        '503':
-          description: LLM description disabled (ANTHROPIC_ENABLED=false)
+                $ref: "#/components/schemas/OrgStatusSummary"
+          description: Summary returned
+      summary: Org-wide service freshness summary
+      tags:
+      - Query — Org Status
+  /v1/status/{serviceId}:
+    get:
+      description: "Returns the freshness status (CURRENT, STALE, INDEXING, NOT_INDEXED)\
+        \ for the given service, along with the last indexed commit SHA and timestamp.\
+        \ This endpoint is never cached — it always reads live from analysis_runs."
+      operationId: status
+      parameters:
+      - description: Unique service identifier
+        in: path
+        name: serviceId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelopeMapStringObject"
+          description: Status returned (check freshnessStatus field)
+      summary: Get indexing status for a service
+      tags:
+      - Query — Status
+  /v1/workspace:
+    get:
+      description: Merges org DB config with workspace.yml bootstrap for defaultOrgId
+      operationId: getWorkspace
+      parameters:
+      - description: Organisation ID
+        in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResolvedWorkspaceView"
+          description: OK
+      summary: Resolved workspace config for an org
+      tags:
+      - Admin — Workspace Catalog
+  /v1/workspace/catalog-libraries:
+    get:
+      operationId: listCatalogLibraries
+      parameters:
+      - in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CatalogLibraryConfig"
+          description: OK
+      summary: List catalog libraries for an org
+      tags:
+      - Admin — Workspace Catalog
     post:
-      tags: [Analysis]
-      summary: Generate business description via Claude API
-      operationId: generateServiceDescription
+      operationId: createCatalogLibrary
       parameters:
-        - $ref: '#/components/parameters/serviceIdPath'
+      - in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCatalogLibraryRequest"
+        required: true
       responses:
-        '200':
-          description: Generated description
+        "201":
           content:
-            text/plain:
+            '*/*':
               schema:
-                type: string
-        '503':
-          description: LLM description disabled
+                $ref: "#/components/schemas/CatalogLibraryConfig"
+          description: Catalog library created
+      summary: Add a catalog library for an org
+      tags:
+      - Admin — Workspace Catalog
+  /v1/workspace/catalog-libraries/{libraryId}:
+    delete:
+      operationId: deleteCatalogLibrary
+      parameters:
+      - in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: libraryId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+      summary: Delete a catalog library
+      tags:
+      - Admin — Workspace Catalog
+    get:
+      operationId: getCatalogLibrary
+      parameters:
+      - in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: libraryId
+        required: true
+        schema:
+          type: string
+      responses:
+        "404":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CatalogLibraryConfig"
+          description: Catalog library not found
+      summary: Get a catalog library by id
+      tags:
+      - Admin — Workspace Catalog
+    patch:
+      operationId: updateCatalogLibrary
+      parameters:
+      - in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: libraryId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCatalogLibraryRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CatalogLibraryConfig"
+          description: OK
+      summary: Update a catalog library
+      tags:
+      - Admin — Workspace Catalog
+  /v1/workspace/catalog-libraries/{libraryId}/register:
+    post:
+      description: Creates moduleType=library registry row matching the org catalog
+        config
+      operationId: registerCatalogLibrary
+      parameters:
+      - in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: libraryId
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: buildTool
+        required: false
+        schema:
+          type: string
+          default: MAVEN
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ServiceEntry"
+          description: OK
+      summary: Register catalog library in service registry
+      tags:
+      - Admin — Workspace Catalog
+  /v1/workspace/import-from-yaml:
+    post:
+      operationId: importFromYaml
+      parameters:
+      - in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+          description: OK
+      summary: Import workspace.yml into org-scoped DB config
+      tags:
+      - Admin — Workspace Catalog
+  /v1/workspace/service-modules:
+    get:
+      operationId: listServiceModules
+      parameters:
+      - in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ServiceModuleConfig"
+          description: OK
+      summary: List service modules for an org
+      tags:
+      - Admin — Workspace Catalog
+    post:
+      operationId: createServiceModule
+      parameters:
+      - in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateServiceModuleRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ServiceModuleConfig"
+          description: OK
+      summary: Add a service module for an org
+      tags:
+      - Admin — Workspace Catalog
+  /v1/workspace/service-modules/{moduleId}:
+    delete:
+      operationId: deleteServiceModule
+      parameters:
+      - in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: moduleId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+      summary: Delete a service module
+      tags:
+      - Admin — Workspace Catalog
+    get:
+      operationId: getServiceModule
+      parameters:
+      - in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: moduleId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ServiceModuleConfig"
+          description: OK
+      summary: Get a service module by id
+      tags:
+      - Admin — Workspace Catalog
+    patch:
+      operationId: updateServiceModule
+      parameters:
+      - in: query
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: moduleId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateServiceModuleRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ServiceModuleConfig"
+          description: OK
+      summary: Update a service module
+      tags:
+      - Admin — Workspace Catalog
+  /webhook/github:
+    post:
+      description: "Accepts GitHub `push` and `pull_request` webhook events. Validates\
+        \ the HMAC-SHA256 signature, extracts changed files (including OpenAPI JSON\
+        \ via GitHub PR files API when needed), and queues analysis jobs to Kafka.\
+        \ Returns 202 Accepted on success."
+      operationId: handleWebhook
+      parameters:
+      - description: "GitHub event type (push, pull_request)"
+        in: header
+        name: X-GitHub-Event
+        required: true
+        schema:
+          type: string
+      - description: HMAC-SHA256 signature for payload verification
+        in: header
+        name: X-Hub-Signature-256
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: string
+        required: true
+      responses:
+        "200":
+          description: Webhook received but ignored (unsupported event or action)
+        "202":
+          description: Webhook accepted and queued
+        "401":
+          description: Invalid HMAC signature
+      summary: Receive GitHub webhook
+      tags:
+      - Webhook
 components:
-  parameters:
-    serviceId:
-      name: serviceId
-      in: query
-      required: true
-      description: Service identifier
-      schema:
-        type: string
-    serviceIdPath:
-      name: serviceId
-      in: path
-      required: true
-      description: Unique service identifier
-      schema:
-        type: string
-    orgId:
-      name: orgId
-      in: query
-      required: false
-      description: Organisation ID
-      schema:
-        type: string
-        default: acme
-    repo:
-      name: repo
-      in: query
-      required: false
-      description: Repository name
-      schema:
-        type: string
-        default: ""
   schemas:
-    ResponseEnvelope:
+    AffectedConsumer:
       type: object
       properties:
-        schemaVersion:
+        consumerClass:
           type: string
-          example: "1.0"
-        indexedAt:
+        consumerServiceId:
           type: string
-          format: date-time
-          nullable: true
-        commitSha:
+        consumerServiceName:
           type: string
-          nullable: true
-        freshnessStatus:
+        httpMethod:
           type: string
-          enum: [CURRENT, STALE, INDEXING, NOT_INDEXED]
-        data:
-          nullable: true
-    RegistrationRequest:
-      type: object
-      required: [orgId, repo, serviceName, buildTool]
-      properties:
-        orgId:
+        nodeType:
           type: string
-        repo:
-          type: string
-        serviceName:
-          type: string
-        buildTool:
-          type: string
-          enum: [MAVEN, GRADLE]
-        moduleType:
-          type: string
-        sourceRoots:
-          type: array
-          items:
-            type: string
-        testRoots:
-          type: array
-          items:
-            type: string
-        ownerTeam:
-          type: string
-    RegistryUpdateRequest:
-      type: object
-      properties:
-        serviceName:
-          type: string
-        ownerTeam:
-          type: string
-        sourceRoots:
-          type: array
-          items:
-            type: string
-        testRoots:
-          type: array
-          items:
-            type: string
-    ServiceEntry:
-      type: object
-      properties:
-        serviceId:
-          type: string
-        orgId:
-          type: string
-        repo:
-          type: string
-        serviceName:
-          type: string
-        buildTool:
-          type: string
-        moduleType:
-          type: string
-        status:
-          type: string
-    LocalIndexTriggerRequest:
-      type: object
-      required: [orgId, path]
-      properties:
-        orgId:
-          type: string
-          example: acme
         path:
           type: string
-          example: /workspace/orders
-    LocalIndexTriggerResponse:
+        source:
+          type: string
+    ArtifactImpact:
       type: object
       properties:
-        serviceId:
+        artifact:
           type: string
-        jobId:
+        downstreamServices:
+          type: array
+          items:
+            $ref: "#/components/schemas/DownstreamArtifactService"
+        newVersion:
           type: string
-        status:
+        previousVersion:
+          type: string
+    CatalogLibraryConfig:
+      type: object
+      properties:
+        id:
+          type: string
+        indexDdl:
+          type: boolean
+        indexOpenApi:
+          type: boolean
+        repo:
+          type: string
+        serviceName:
+          type: string
+        sourceRoots:
+          type: array
+          items:
+            type: string
+    ChangedSymbol:
+      type: object
+      properties:
+        filePath:
+          type: string
+        httpMethod:
+          type: string
+        path:
+          type: string
+        symbolFqn:
+          type: string
+        symbolKind:
+          type: string
+    ClassGap:
+      type: object
+      properties:
+        classFqn:
+          type: string
+        filePath:
+          type: string
+        kind:
+          type: string
+    ConsistencyGapView:
+      type: object
+      properties:
+        description:
+          type: string
+        detail:
+          type: string
+        gapType:
+          type: string
+        scopeRef:
+          type: string
+    ConsistencyHintView:
+      type: object
+      properties:
+        confidence:
+          type: number
+          format: double
+        correlationKeys:
+          type: array
+          items:
+            type: string
+        downstreamGates:
+          type: array
+          items:
+            $ref: "#/components/schemas/DownstreamGateView"
+        evidenceSource:
+          type: string
+        invariants:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsistencyInvariantHintView"
+        participants:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsistencyParticipantHintView"
+        pattern:
+          type: string
+        pollStrategy:
+          $ref: "#/components/schemas/ConsistencyPollStrategyView"
+        primaryPhysical:
+          type: string
+        primaryStore:
+          type: string
+        scenarioId:
+          type: string
+    ConsistencyInvariantHintView:
+      type: object
+      properties:
+        description:
+          type: string
+        kind:
+          type: string
+        pollHint:
+          type: string
+    ConsistencyParticipantHintView:
+      type: object
+      properties:
+        lagClass:
+          type: string
+        physicalName:
+          type: string
+        role:
+          type: string
+        storeType:
+          type: string
+        via:
+          type: string
+    ConsistencyPollStrategyView:
+      type: object
+      properties:
+        notes:
+          type: array
+          items:
+            type: string
+        order:
+          type: array
+          items:
+            type: string
+        primaryPollHint:
+          type: string
+    ConsistencyScenarioView:
+      type: object
+      properties:
+        attributes:
+          type: string
+        confidence:
+          type: number
+          format: double
+        correlationKeys:
+          type: array
+          items:
+            type: string
+        evidenceSource:
+          type: string
+        invariants:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsistencyInvariantHintView"
+        participants:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsistencyParticipantHintView"
+        pattern:
+          type: string
+        pollStrategy:
+          $ref: "#/components/schemas/ConsistencyPollStrategyView"
+        primaryPhysical:
+          type: string
+        primaryStore:
+          type: string
+        scenarioId:
+          type: string
+        scopeKind:
+          type: string
+        scopeRef:
+          type: string
+    ContractEntryFlowReport:
+      type: object
+      properties:
+        contractOperation:
+          $ref: "#/components/schemas/ContractOperationView"
+        entryFlow:
+          $ref: "#/components/schemas/EntryFlowReport"
+        link:
+          $ref: "#/components/schemas/EntryTriggerLink"
+    ContractGapView:
+      type: object
+      properties:
+        description:
+          type: string
+        gapType:
+          type: string
+        httpMethod:
+          type: string
+        linkedHandlerFqn:
+          type: string
+        linkedMethod:
+          type: string
+        mappedServiceName:
+          type: string
+        operationId:
+          type: string
+        operationIdOpenapi:
+          type: string
+        pathNormalized:
+          type: string
+        pathTemplate:
+          type: string
+        specDomain:
+          type: string
+    ContractOperationLinkedView:
+      type: object
+      properties:
+        link:
+          $ref: "#/components/schemas/EntryTriggerLink"
+        operation:
+          $ref: "#/components/schemas/ContractOperationView"
+    ContractOperationView:
+      type: object
+      properties:
+        confidence:
+          type: number
+          format: double
+        evidenceSource:
+          type: string
+        httpMethod:
+          type: string
+        mappedServiceName:
+          type: string
+        openapiVersion:
+          type: string
+        operationId:
+          type: string
+        operationIdOpenapi:
+          type: string
+        pathNormalized:
+          type: string
+        pathTemplate:
+          type: string
+        requestFieldSummaryJson:
+          type: string
+        requestSchemaRef:
+          type: string
+        responseFieldSummaryJson:
+          type: string
+        responseSchemaRef:
+          type: string
+        serverUrlsJson:
+          type: string
+        specDomain:
+          type: string
+        specFile:
+          type: string
+        summary:
+          type: string
+        tagsJson:
+          type: string
+    ContractSchemaView:
+      type: object
+      properties:
+        evidenceSource:
+          type: string
+        nestedFieldPathsJson:
+          type: string
+        requiredFieldsJson:
+          type: string
+        schemaId:
+          type: string
+        schemaTitle:
+          type: string
+        schemaType:
+          type: string
+        specFile:
+          type: string
+        topLevelFieldsJson:
+          type: string
+    ContractTestCoverageGapView:
+      type: object
+      properties:
+        description:
+          type: string
+        gapType:
+          type: string
+        httpMethod:
+          type: string
+        mappedServiceName:
+          type: string
+        operationId:
+          type: string
+        pathConstantRef:
+          type: string
+        pathNormalized:
+          type: string
+        pathTemplate:
+          type: string
+        specDomain:
+          type: string
+        testFilePath:
+          type: string
+    CreateCatalogLibraryRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        indexDdl:
+          type: boolean
+        repo:
+          type: string
+        serviceName:
+          type: string
+        sourceRoots:
+          type: array
+          items:
+            type: string
+      required:
+      - id
+      - repo
+      - sourceRoots
+    CreateServiceModuleRequest:
+      type: object
+      properties:
+        catalogLibraryIds:
+          type: array
+          items:
+            type: string
+        id:
+          type: string
+        repo:
+          type: string
+        sourceRoots:
+          type: array
+          items:
+            type: string
+      required:
+      - id
+      - repo
+      - sourceRoots
+    CrossRepoFlowReport:
+      type: object
+      properties:
+        consistencyHints:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsistencyHintView"
+        envLane:
+          type: string
+        externalEndpoints:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExternalEndpointView"
+        followMode:
+          type: string
+        gaps:
+          type: array
+          items:
+            $ref: "#/components/schemas/FlowGap"
+        hopSummaries:
+          type: array
+          items:
+            $ref: "#/components/schemas/CrossRepoHopSummary"
+        hops:
+          type: array
+          items:
+            $ref: "#/components/schemas/CrossRepoHop"
+        indexedServiceIds:
+          type: array
+          items:
+            type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        missingBundleRepos:
+          type: array
+          items:
+            type: string
+        narrative:
+          type: array
+          items:
+            type: string
+        orgId:
+          type: string
+        skippedExpansionCount:
+          type: integer
+          format: int32
+        startTopic:
+          type: string
+        traceWarnings:
+          type: array
+          items:
+            type: string
+    CrossRepoHop:
+      type: object
+      properties:
+        order:
+          type: integer
+          format: int32
+        publishers:
+          type: array
+          items:
+            $ref: "#/components/schemas/PubSubOrgView"
+        subscribers:
+          type: array
+          items:
+            $ref: "#/components/schemas/PubSubOrgView"
+        terminalContinuations:
+          type: array
+          items:
+            $ref: "#/components/schemas/TerminalContinuationView"
+        topicShortId:
+          type: string
+        transport:
+          type: string
+    CrossRepoHopSummary:
+      type: object
+      properties:
+        order:
+          type: integer
+          format: int32
+        publishers:
+          type: array
+          items:
+            $ref: "#/components/schemas/HopParticipantSummary"
+        subscribers:
+          type: array
+          items:
+            $ref: "#/components/schemas/HopParticipantSummary"
+        summaryLine:
+          type: string
+        topicShortId:
+          type: string
+        transport:
+          type: string
+    DataAccessSummary:
+      type: object
+      properties:
+        handlerClassFqn:
+          type: string
+        handlerMethod:
+          type: string
+        operation:
+          type: string
+        storeType:
+          type: string
+        tableOrEntity:
+          type: string
+    DataAccessView:
+      type: object
+      properties:
+        accessorFqn:
+          type: string
+        accessorKind:
+          type: string
+        catalogRef:
+          type: string
+        confidence:
+          type: number
+          format: double
+        consistencyHints:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsistencyHintView"
+        correlationKeys:
+          type: string
+        daoMethod:
+          type: string
+        domainFqn:
+          type: string
+        entityFqn:
+          type: string
+        evidenceSource:
+          type: string
+        flowSteps:
+          type: string
+        handlerClassFqn:
+          type: string
+        handlerMethod:
+          type: string
+        operation:
+          type: string
+        physicalName:
+          type: string
+        pollHint:
+          type: string
+        secondaryStores:
+          type: string
+        storeType:
+          type: string
+        tableOrEntity:
+          type: string
+        validationKind:
+          type: string
+    DataObjectGapView:
+      type: object
+      properties:
+        ddlPath:
+          type: string
+        description:
+          type: string
+        entityFqn:
+          type: string
+        gapType:
+          type: string
+        physicalName:
+          type: string
+        storeType:
+          type: string
+    DataObjectView:
+      type: object
+      properties:
+        attributes:
+          type: string
+        catalogOrKeyspace:
+          type: string
+        collectionOrTableKind:
+          type: string
+        confidence:
+          type: number
+          format: double
+        domainFqn:
+          type: string
+        entityFqn:
+          type: string
+        evidenceSource:
+          type: string
+        physicalName:
+          type: string
+        storeType:
+          type: string
+    DependencyTreeResult:
+      type: object
+      properties:
+        edges:
+          type: array
+          items:
+            type: object
+        nodeIds:
+          type: array
+          items:
+            type: string
+        nodes:
+          type: array
+          items:
+            type: object
+        rootModulePath:
+          type: string
+        unresolvedCount:
+          type: integer
+          format: int32
+    DependencyView:
+      type: object
+      properties:
+        artifactId:
+          type: string
+        fromModulePath:
+          type: string
+        groupId:
+          type: string
+        linkedRepo:
+          type: string
+        linkedServiceId:
+          type: string
+        linkSource:
+          type: string
+          description: MAVEN_MODULE_GAV | CATALOG | REGISTRY | ALIAS
+        crossRepo:
+          type: boolean
+        optional:
+          type: boolean
+        resolved:
+          type: boolean
+        scope:
+          type: string
+        transitive:
+          type: boolean
+        unresolvedReason:
+          type: string
+        version:
+          type: string
+        versionLiteral:
           type: string
     DiscoveryResult:
       type: object
       properties:
-        orgId:
-          type: string
-        registered:
+        alreadyKnown:
           type: array
           items:
             type: string
-        alreadyKnown:
+        registered:
           type: array
           items:
             type: string
@@ -601,67 +3136,15 @@ components:
           type: array
           items:
             type: string
-    ImpactReport:
+    DownstreamArtifactService:
       type: object
       properties:
+        pinnedVersion:
+          type: string
+        repo:
+          type: string
         serviceId:
           type: string
-        commitSha:
-          type: string
-        changedSymbols:
-          type: array
-          items:
-            $ref: '#/components/schemas/ChangedSymbol'
-        affectedConsumers:
-          type: array
-          items:
-            $ref: '#/components/schemas/AffectedConsumer'
-        downstreamDependencies:
-          type: array
-          items:
-            $ref: '#/components/schemas/DownstreamDependency'
-        suggestedTestScope:
-          type: array
-          items:
-            $ref: '#/components/schemas/SuggestedTest'
-        missingTestClasses:
-          type: array
-          items:
-            type: string
-    ChangedSymbol:
-      type: object
-      properties:
-        symbolFqn:
-          type: string
-        symbolKind:
-          type: string
-        filePath:
-          type: string
-        httpMethod:
-          type: string
-          nullable: true
-        path:
-          type: string
-          nullable: true
-    AffectedConsumer:
-      type: object
-      properties:
-        source:
-          type: string
-        consumerServiceId:
-          type: string
-        consumerServiceName:
-          type: string
-        consumerClass:
-          type: string
-        nodeType:
-          type: string
-        httpMethod:
-          type: string
-          nullable: true
-        path:
-          type: string
-          nullable: true
     DownstreamDependency:
       type: object
       properties:
@@ -671,18 +3154,2531 @@ components:
           type: string
         path:
           type: string
+    DownstreamGateView:
+      type: object
+      properties:
+        effectWhenFail:
+          type: string
+        gateKey:
+          type: string
+        hopOrder:
+          type: integer
+          format: int32
+        repo:
+          type: string
+        requiredValue:
+          type: string
+        serviceId:
+          type: string
+        testPrecondition:
+          type: string
+    EntryFlowReport:
+      type: object
+      properties:
+        crossRepoFlow:
+          $ref: "#/components/schemas/CrossRepoFlowReport"
+        envLane:
+          type: string
+        externalEndpoints:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExternalEndpointView"
+        messagingFlow:
+          $ref: "#/components/schemas/EventFlowReport"
+        messagingTopicShortId:
+          type: string
+        path:
+          type: string
+        processorRouting:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProcessorRoutingStep"
+        serviceId:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/EntryFlowStep"
+        triggerId:
+          type: string
+        wiringTargets:
+          type: array
+          items:
+            $ref: "#/components/schemas/WiringTarget"
+    EntryFlowStep:
+      type: object
+      properties:
+        gates:
+          type: array
+          items:
+            $ref: "#/components/schemas/GateSummary"
+        order:
+          type: integer
+          format: int32
+        reads:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataAccessSummary"
+        trigger:
+          $ref: "#/components/schemas/EntryTriggerView"
+        writes:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataAccessSummary"
+    EntryTriggerImpactHit:
+      type: object
+      properties:
+        matchKind:
+          type: string
+        repo:
+          type: string
+        serviceId:
+          type: string
+        serviceName:
+          type: string
+        trigger:
+          $ref: "#/components/schemas/EntryTriggerView"
+    EntryTriggerImpactReport:
+      type: object
+      properties:
+        envLane:
+          type: string
+        handlerFqn:
+          type: string
+        handlerMethod:
+          type: string
+        orgId:
+          type: string
+        serviceId:
+          type: string
+        triggers:
+          type: array
+          items:
+            $ref: "#/components/schemas/EntryTriggerImpactHit"
+    EntryTriggerLink:
+      type: object
+      properties:
+        entryTriggerId:
+          type: string
+        implementingServiceId:
+          type: string
+        implementingServiceName:
+          type: string
+        linkStatus:
+          type: string
+        linkedHandlerFqn:
+          type: string
+        linkedHandlerMethod:
+          type: string
+        pathPattern:
+          type: string
+        triggerKind:
+          type: string
+    EntryTriggerView:
+      type: object
+      properties:
+        actor:
+          type: string
+        boundary:
+          type: string
+        confidence:
+          type: number
+          format: double
+        direction:
+          type: string
+        envLane:
+          type: string
+        evidenceSource:
+          type: string
+        flowStep:
+          type: string
+        httpMethod:
+          type: string
+        linkedHandlerFqn:
+          type: string
+        linkedMethod:
+          type: string
+        pathPattern:
+          type: string
+        sourceRef:
+          type: string
+        triggerId:
+          type: string
+        triggerKind:
+          type: string
+    EventFlowReport:
+      type: object
+      properties:
+        envLane:
+          type: string
+        gaps:
+          type: array
+          items:
+            $ref: "#/components/schemas/FlowGap"
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        pubsubResources:
+          type: array
+          items:
+            $ref: "#/components/schemas/PubSubView"
+        serviceId:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/EventFlowStep"
+        topicShortId:
+          type: string
+    EventFlowStep:
+      type: object
+      properties:
+        consistencyHints:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsistencyHintView"
+        externalEndpoints:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExternalEndpointView"
+        gates:
+          type: array
+          items:
+            $ref: "#/components/schemas/FlowGateView"
+        handler:
+          type: string
+        inbound:
+          $ref: "#/components/schemas/InboundMsg"
+        inboundTriggers:
+          type: array
+          items:
+            $ref: "#/components/schemas/EntryTriggerView"
+        order:
+          type: integer
+          format: int32
+        outbounds:
+          type: array
+          items:
+            $ref: "#/components/schemas/OutboundMsg"
+        reads:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataAccessView"
+        validationHints:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationHintView"
+        workload:
+          type: string
+        writes:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataAccessView"
+    ExternalDependency:
+      type: object
+      properties:
+        boundary:
+          type: string
+        callerClass:
+          type: string
+        configKey:
+          type: string
+        endpointId:
+          type: string
+        flowStep:
+          type: string
+        httpMethod:
+          type: string
+        operation:
+          type: string
+        partnerSlug:
+          type: string
+        urlResolved:
+          type: string
+    ExternalEndpointFactView:
+      type: object
+      properties:
+        authScheme:
+          type: string
+        boundary:
+          type: string
+        callerClassFqn:
+          type: string
+        clientClassFqn:
+          type: string
+        confidence:
+          type: number
+          format: double
+        configKey:
+          type: string
+        endpointId:
+          type: string
+        envLane:
+          type: string
+        evidenceSource:
+          type: string
+        flowStep:
+          type: string
+        httpMethod:
+          type: string
+        indexedAt:
+          type: string
+          format: date-time
+        operation:
+          type: string
+        partnerSlug:
+          type: string
+        urlResolved:
+          type: string
+        urlTemplate:
+          type: string
+    ExternalEndpointView:
+      type: object
+      properties:
+        authScheme:
+          type: string
+        boundary:
+          type: string
+        callerClassFqn:
+          type: string
+        clientClassFqn:
+          type: string
+        confidence:
+          type: number
+          format: double
+        configKey:
+          type: string
+        endpointId:
+          type: string
+        envLane:
+          type: string
+        evidenceSource:
+          type: string
+        flowStep:
+          type: string
+        httpMethod:
+          type: string
+        operation:
+          type: string
+        partnerSlug:
+          type: string
+        serviceId:
+          type: string
+        serviceName:
+          type: string
+        urlResolved:
+          type: string
+        urlTemplate:
+          type: string
+    FactoryRoutingView:
+      type: object
+      properties:
+        discriminatorType:
+          type: string
+        factoryFqn:
+          type: string
+        nodeId:
+          type: string
+        routes:
+          type: array
+          items:
+            $ref: "#/components/schemas/RouteEntry"
+        selectorMethod:
+          type: string
+    FlowDiagramAnchor:
+      type: object
+      properties:
+        kind:
+          type: string
+        linkedHandlerFqn:
+          type: string
+        nodeId:
+          type: string
+        symbolFqn:
+          type: string
+        triggerId:
+          type: string
+    FlowDiagramEdge:
+      type: object
+      properties:
+        edgeType:
+          type: string
+        from:
+          type: string
+        label:
+          type: string
+        to:
+          type: string
+    FlowDiagramGap:
+      type: object
+      properties:
+        description:
+          type: string
+        gapType:
+          type: string
+        shortId:
+          type: string
+    FlowDiagramGate:
+      type: object
+      properties:
+        effectWhenFail:
+          type: string
+        gateKey:
+          type: string
+    FlowDiagramNode:
+      type: object
+      properties:
+        annotations:
+          type: array
+          items:
+            type: string
+        gates:
+          type: array
+          items:
+            $ref: "#/components/schemas/FlowDiagramGate"
+        kind:
+          type: string
+        moduleScope:
+          type: string
+        nodeId:
+          type: string
+        role:
+          type: string
+        shortId:
+          type: string
+        simpleName:
+          type: string
+        symbolFqn:
+          type: string
+        transport:
+          type: string
+    FlowDiagramResult:
+      type: object
+      properties:
+        anchor:
+          $ref: "#/components/schemas/FlowDiagramAnchor"
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/FlowDiagramEdge"
+        gaps:
+          type: array
+          items:
+            $ref: "#/components/schemas/FlowDiagramGap"
+        mermaid:
+          type: string
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/FlowDiagramNode"
+        serviceId:
+          type: string
+        stats:
+          $ref: "#/components/schemas/FlowDiagramStats"
+    FlowDiagramStats:
+      type: object
+      properties:
+        consumerClassCount:
+          type: integer
+          format: int32
+        edgeCount:
+          type: integer
+          format: int32
+        nodeCount:
+          type: integer
+          format: int32
+    FlowGap:
+      type: object
+      properties:
+        description:
+          type: string
+        gapType:
+          type: string
+        hopOrder:
+          type: integer
+          format: int32
+        topicShortId:
+          type: string
+    FlowGateView:
+      type: object
+      properties:
+        confidence:
+          type: number
+          format: double
+        effectWhenFail:
+          type: string
+        evidenceSource:
+          type: string
+        gateKey:
+          type: string
+        gateKind:
+          type: string
+        guardedFlowStep:
+          type: string
+        guardedSymbolFqn:
+          type: string
+        liveEvidence:
+          type: string
+        liveSnapshotAt:
+          type: string
+          format: date-time
+        liveStatus:
+          type: string
+        liveValue:
+          type: string
+        requiredValue:
+          type: string
+        testPrecondition:
+          type: string
+    GapReport:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        gaps:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClassGap"
+        productionClassCount:
+          type: integer
+          format: int32
+        serviceId:
+          type: string
+        testedClassCount:
+          type: integer
+          format: int32
+        untestedClassCount:
+          type: integer
+          format: int32
+    GateSummary:
+      type: object
+      properties:
+        effectWhenFail:
+          type: string
+        gateKey:
+          type: string
+        gateKind:
+          type: string
+        guardedSymbolFqn:
+          type: string
+        requiredValue:
+          type: string
+        testPrecondition:
+          type: string
+    GraphEdge:
+      type: object
+      properties:
+        confidence:
+          type: number
+          format: double
+        edgeType:
+          type: string
+        evidenceSource:
+          type: string
+        fromNode:
+          type: string
+        toNode:
+          type: string
+    GraphNode:
+      type: object
+      properties:
+        id:
+          type: string
+        moduleType:
+          type: string
+        nodeType:
+          type: string
+        orgId:
+          type: string
+        repo:
+          type: string
+        service:
+          type: string
+        symbolFqn:
+          type: string
+    HopParticipantSummary:
+      type: object
+      properties:
+        evidenceSource:
+          type: string
+        label:
+          type: string
+        linkedClassSimpleName:
+          type: string
+        repo:
+          type: string
+        role:
+          type: string
+        serviceId:
+          type: string
+        serviceName:
+          type: string
+        transport:
+          type: string
+    ImpactReport:
+      type: object
+      properties:
+        affectedConsumers:
+          type: array
+          items:
+            $ref: "#/components/schemas/AffectedConsumer"
+        artifactImpact:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactImpact"
+        changedSymbols:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChangedSymbol"
+        commitSha:
+          type: string
+        downstreamDependencies:
+          type: array
+          items:
+            $ref: "#/components/schemas/DownstreamDependency"
+        externalDownstreamDependencies:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExternalDependency"
+        missingTestClasses:
+          type: array
+          items:
+            type: string
+        serviceId:
+          type: string
+        suggestedTestScope:
+          type: array
+          items:
+            $ref: "#/components/schemas/SuggestedTest"
+    InboundMsg:
+      type: object
+      properties:
+        payloadOrResource:
+          type: string
+        role:
+          type: string
+        topicOrType:
+          type: string
+    MavenLinkBackfillRequest:
+      type: object
+      properties:
+        orgId:
+          type: string
+        serviceId:
+          type: string
+        syncOwnedByEdges:
+          type: boolean
+          default: false
+    MavenLinkBackfillResponse:
+      type: object
+      properties:
+        orgId:
+          type: string
+        servicesProcessed:
+          type: integer
+          format: int32
+        dependencyRowsUpdated:
+          type: integer
+          format: int32
+        ownedByEdgesSynced:
+          type: integer
+          format: int32
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/MavenLinkBackfillServiceSummary"
+    MavenLinkBackfillServiceSummary:
+      type: object
+      properties:
+        serviceId:
+          type: string
+        commitSha:
+          type: string
+        rowsUpdated:
+          type: integer
+          format: int32
+        ownedByEdges:
+          type: integer
+          format: int32
+    IndexClearRequest:
+      type: object
+      properties:
+        includeRegistry:
+          type: boolean
+        orgId:
+          type: string
+        scope:
+          type: string
+        serviceId:
+          type: string
+    IndexClearResponse:
+      type: object
+      properties:
+        deletedCounts:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int32
+        orgId:
+          type: string
+        scope:
+          type: string
+        serviceId:
+          type: string
+        serviceName:
+          type: string
+    IndexCompleteEvent:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        eventType:
+          type: string
+        indexedAt:
+          type: string
+          format: date-time
+        jobId:
+          type: string
+        orgId:
+          type: string
+        repo:
+          type: string
+        scope:
+          type: string
+        serviceId:
+          type: string
+    IndexTriggerRequest:
+      type: object
+      properties:
+        commitSha:
+          type: string
+    IndexTriggerResponse:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        fileCount:
+          type: integer
+          format: int32
+        jobId:
+          type: string
+        serviceId:
+          type: string
+    JobStatusResponse:
+      type: object
+      properties:
+        attempt:
+          type: integer
+          format: int32
+        commitSha:
+          type: string
+        completedAt:
+          type: string
+          format: date-time
+        enqueuedAt:
+          type: string
+          format: date-time
+        errorDetail:
+          type: string
+        jobId:
+          type: string
+        jobType:
+          type: string
+        orgId:
+          type: string
+        serviceId:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+    LiveVerificationView:
+      type: object
+      properties:
+        evidenceSource:
+          type: string
+        expectedTopicShortId:
+          type: string
+        liveTopicFullName:
+          type: string
+        liveTopicShortId:
+          type: string
+        status:
+          type: string
+        verifiedAt:
+          type: string
+          format: date-time
+    LocalIndexTriggerRequest:
+      type: object
+      description: Request to index all Java files in a server-accessible directory
+      properties:
+        catalogLibraryId:
+          type: string
+          description: Optional workspace.yml catalogLibraries id when multiple libs
+            share one repo
+          example: platform-bigquery
+        orgId:
+          type: string
+          description: GitHub organisation identifier
+          example: acme
+        path:
+          type: string
+          description: Absolute path on the server filesystem to the project root
+          example: /workspace/orders
+        serviceModuleId:
+          type: string
+          description: Optional workspace.yml serviceModules id for monorepo index
+            targets
+          example: partner-adapter-suite
+      required:
+      - orgId
+      - path
+    LocalIndexTriggerResponse:
+      type: object
+      description: Result of a local folder indexing operation
+      properties:
+        autoRegistered:
+          type: boolean
+          description: True if the service was newly registered during this request;
+            false if it already existed
+          example: true
+        commitSha:
+          type: string
+          description: "Git commit SHA at the indexed directory, or 'local-{epoch}'\
+            \ if not a git repo"
+          example: d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3
+        configFileCount:
+          type: integer
+          format: int32
+          description: Number of YAML application config and .proto files submitted
+            for messaging analysis
+          example: 31
+        ddlFileCount:
+          type: integer
+          format: int32
+          description: Number of DDL/SQL files submitted (catalog libraries with indexDdl)
+          example: 12
+        fileCount:
+          type: integer
+          format: int32
+          description: Number of .java files found and submitted for analysis
+          example: 47
+        openApiFileCount:
+          type: integer
+          format: int32
+          description: Number of OpenAPI/JSON spec files submitted (catalog libraries
+            with indexOpenApi)
+          example: 298
+        serviceId:
+          type: string
+          description: Stable service identifier (UUID) assigned at registration
+          example: a3f2e1b4-9c8d-4e2f-b1a3-7d6e5f4c3b2a
+        serviceName:
+          type: string
+          description: Service name derived from the directory name
+          example: orders
+    MavenDependenciesReport:
+      type: object
+      properties:
+        dependencies:
+          type: array
+          items:
+            $ref: "#/components/schemas/DependencyView"
+        modules:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModuleView"
+    MessageSchemaView:
+      type: object
+      properties:
+        confidence:
+          type: number
+          format: double
+        direction:
+          type: string
+        evidenceSource:
+          type: string
+        linkedClassFqn:
+          type: string
+        payloadFields:
+          type: string
+        payloadProto:
+          type: string
+        topicShortId:
+          type: string
+        unpackExpression:
+          type: string
+    ModuleView:
+      type: object
+      properties:
+        artifactId:
+          type: string
+        groupId:
+          type: string
+        modulePath:
+          type: string
+        packaging:
+          type: string
+        relativePomPath:
+          type: string
+        resolutionStatus:
+          type: string
+        version:
+          type: string
+    OrgServiceStatus:
+      type: object
+      properties:
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        lastCommitSha:
+          type: string
+        lastJobId:
+          type: string
+        lastJobStatus:
+          type: string
+        orgId:
+          type: string
+        repo:
+          type: string
+        serviceId:
+          type: string
+        serviceName:
+          type: string
+    OrgStatusSummary:
+      type: object
+      properties:
+        orgId:
+          type: string
+        serviceCount:
+          type: integer
+          format: int32
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrgServiceStatus"
+    OutboundCallView:
+      type: object
+      properties:
+        confidence:
+          type: number
+          format: double
+        evidenceSource:
+          type: string
+        httpMethod:
+          type: string
+        indexedAt:
+          type: string
+          format: date-time
+        path:
+          type: string
+        sourceSymbol:
+          type: string
+    OutboundMsg:
+      type: object
+      properties:
+        payloadOrResource:
+          type: string
+        role:
+          type: string
+        topicOrType:
+          type: string
+        transport:
+          type: string
+    PageResultDataObjectView:
+      type: object
+      properties:
+        hasMore:
+          type: boolean
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataObjectView"
+        limit:
+          type: integer
+          format: int32
+        offset:
+          type: integer
+          format: int32
+        total:
+          type: integer
+          format: int64
+    PageResultSchemaObjectView:
+      type: object
+      properties:
+        hasMore:
+          type: boolean
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SchemaObjectView"
+        limit:
+          type: integer
+          format: int32
+        offset:
+          type: integer
+          format: int32
+        total:
+          type: integer
+          format: int64
+    ProcessorRoutingStep:
+      type: object
+      properties:
+        discriminatorType:
+          type: string
+        factoryFqn:
+          type: string
+        kind:
+          type: string
+        possibleProcessors:
+          type: array
+          items:
+            type: string
+        selectorMethod:
+          type: string
+    PubSubOrgView:
+      type: object
+      properties:
+        confidence:
+          type: number
+          format: double
+        consistencyHints:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsistencyHintView"
+        envLane:
+          type: string
+        evidenceSource:
+          type: string
+        fullResourceId:
+          type: string
+        inboundTriggers:
+          type: array
+          items:
+            $ref: "#/components/schemas/EntryTriggerView"
+        linkedClassFqn:
+          type: string
+        liveVerification:
+          $ref: "#/components/schemas/LiveVerificationView"
+        moduleName:
+          type: string
+        repo:
+          type: string
+        resourceKind:
+          type: string
+        role:
+          type: string
+        serviceId:
+          type: string
+        serviceName:
+          type: string
+        shortId:
+          type: string
+        springKey:
+          type: string
+        transport:
+          type: string
+        workloadName:
+          type: string
+    PubSubView:
+      type: object
+      properties:
+        confidence:
+          type: number
+          format: double
+        envLane:
+          type: string
+        evidenceSource:
+          type: string
+        fullResourceId:
+          type: string
+        linkedClassFqn:
+          type: string
+        liveVerification:
+          $ref: "#/components/schemas/LiveVerificationView"
+        moduleName:
+          type: string
+        resourceKind:
+          type: string
+        role:
+          type: string
+        shortId:
+          type: string
+        springKey:
+          type: string
+        transport:
+          type: string
+        workloadName:
+          type: string
+    ReachabilityResult:
+      type: object
+      properties:
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/GraphEdge"
+        empty:
+          type: boolean
+        nodeIds:
+          type: array
+          items:
+            type: string
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/GraphNode"
+    RegistrationRequest:
+      type: object
+      properties:
+        buildTool:
+          type: string
+        moduleType:
+          type: string
+        orgId:
+          type: string
+        ownerTeam:
+          type: string
+        repo:
+          type: string
+        serviceName:
+          type: string
+        sourceRoots:
+          type: array
+          items:
+            type: string
+        testRoots:
+          type: array
+          items:
+            type: string
+      required:
+      - buildTool
+      - orgId
+      - repo
+      - serviceName
+    RegistryUpdateRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        ownerTeam:
+          type: string
+        sourceRoots:
+          type: array
+          items:
+            type: string
+        testRoots:
+          type: array
+          items:
+            type: string
+    ResolvedWorkspaceView:
+      type: object
+      properties:
+        bundleNames:
+          type: array
+          items:
+            type: string
+        catalogLibraries:
+          type: array
+          items:
+            $ref: "#/components/schemas/CatalogLibraryConfig"
+        defaultBundle:
+          type: string
+        githubDir:
+          type: string
+        orgId:
+          type: string
+        serviceModules:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceModuleConfig"
+        source:
+          type: string
+    ResponseEnvelopeContractEntryFlowReport:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          $ref: "#/components/schemas/ContractEntryFlowReport"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeCrossRepoFlowReport:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          $ref: "#/components/schemas/CrossRepoFlowReport"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeDependencyTreeResult:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          $ref: "#/components/schemas/DependencyTreeResult"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeEntryFlowReport:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          $ref: "#/components/schemas/EntryFlowReport"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeEntryTriggerImpactReport:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          $ref: "#/components/schemas/EntryTriggerImpactReport"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeEventFlowReport:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          $ref: "#/components/schemas/EventFlowReport"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeFlowDiagramResult:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          $ref: "#/components/schemas/FlowDiagramResult"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeGapReport:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          $ref: "#/components/schemas/GapReport"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeImpactReport:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          $ref: "#/components/schemas/ImpactReport"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListConsistencyGapView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsistencyGapView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListConsistencyScenarioView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsistencyScenarioView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListContractGapView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContractGapView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListContractOperationLinkedView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContractOperationLinkedView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListContractOperationView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContractOperationView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListContractSchemaView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContractSchemaView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListContractTestCoverageGapView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContractTestCoverageGapView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListDataAccessView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataAccessView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListDataObjectGapView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataObjectGapView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListEntryTriggerView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/EntryTriggerView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListExternalEndpointFactView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExternalEndpointFactView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListFlowGateView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/FlowGateView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListIndexCompleteEvent:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/IndexCompleteEvent"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListMessageSchemaView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageSchemaView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListOutboundCallView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/OutboundCallView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListPubSubOrgView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/PubSubOrgView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListPubSubView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/PubSubView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListSymbolFactView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SymbolFactView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeListValidationHintView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationHintView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeMapStringObject:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          type: object
+          additionalProperties:
+            type: object
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeMavenDependenciesReport:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          $ref: "#/components/schemas/MavenDependenciesReport"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopePageResultDataObjectView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          $ref: "#/components/schemas/PageResultDataObjectView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopePageResultSchemaObjectView:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          $ref: "#/components/schemas/PageResultSchemaObjectView"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeReachabilityResult:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          $ref: "#/components/schemas/ReachabilityResult"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    ResponseEnvelopeRoutingReport:
+      type: object
+      properties:
+        commitSha:
+          type: string
+        data:
+          $ref: "#/components/schemas/RoutingReport"
+        freshnessStatus:
+          type: string
+          enum:
+          - CURRENT
+          - STALE
+          - INDEXING
+          - NOT_INDEXED
+        indexedAt:
+          type: string
+          format: date-time
+        liveConfigEnv:
+          type: string
+        liveConfigStatus:
+          type: string
+        livePubSubSkippedCount:
+          type: integer
+          format: int32
+        livePubSubStatus:
+          type: string
+        livePubSubVerifiedCount:
+          type: integer
+          format: int32
+        rulePackHash:
+          type: string
+        schemaVersion:
+          type: string
+    RouteEntry:
+      type: object
+      properties:
+        fallback:
+          type: boolean
+        routingKey:
+          type: string
+        targetBean:
+          type: string
+        targetClassFqn:
+          type: string
+        targetNodeId:
+          type: string
+    RoutingReport:
+      type: object
+      properties:
+        factories:
+          type: array
+          items:
+            $ref: "#/components/schemas/FactoryRoutingView"
+        factoryFqnFilter:
+          type: string
+        serviceId:
+          type: string
+    SchemaObjectView:
+      type: object
+      properties:
+        catalogOrKeyspace:
+          type: string
+        ddlPath:
+          type: string
+        evidenceSource:
+          type: string
+        physicalName:
+          type: string
+        storeType:
+          type: string
+    ServiceDescriptionResponse:
+      type: object
+      properties:
+        description:
+          type: string
+        generatedAt:
+          type: string
+          format: date-time
+        model:
+          type: string
+        serviceId:
+          type: string
+    ServiceEntry:
+      type: object
+      properties:
+        buildTool:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        enabled:
+          type: boolean
+        moduleType:
+          type: string
+        orgId:
+          type: string
+        ownerTeam:
+          type: string
+        repo:
+          type: string
+        serviceId:
+          type: string
+        serviceName:
+          type: string
+        sourceRoots:
+          type: array
+          items:
+            type: string
+        testRoots:
+          type: array
+          items:
+            type: string
+        updatedAt:
+          type: string
+          format: date-time
+    ServiceModuleConfig:
+      type: object
+      properties:
+        configRoots:
+          type: array
+          items:
+            type: string
+        id:
+          type: string
+        repo:
+          type: string
+        sourceRoots:
+          type: array
+          items:
+            type: string
+        symbolClasspath:
+          type: array
+          items:
+            $ref: "#/components/schemas/SymbolClasspathEntry"
+    SseEmitter:
+      type: object
+      properties:
+        timeout:
+          type: integer
+          format: int64
     SuggestedTest:
       type: object
       properties:
-        type:
-          type: string
-          enum: [UNIT, INTEGRATION]
         className:
           type: string
-        targetService:
-          type: string
-          nullable: true
         exists:
           type: boolean
         reason:
+          type: string
+        targetService:
+          type: string
+        type:
+          type: string
+    SymbolClasspathEntry:
+      type: object
+      properties:
+        catalogLibrary:
+          type: string
+        repo:
+          type: string
+        roots:
+          type: array
+          items:
+            type: string
+    SymbolFactView:
+      type: object
+      properties:
+        attributes:
+          type: string
+        confidence:
+          type: number
+          format: double
+        evidenceSource:
+          type: string
+        indexedAt:
+          type: string
+          format: date-time
+        symbolFqn:
+          type: string
+        symbolKind:
+          type: string
+    TerminalContinuationView:
+      type: object
+      properties:
+        bqDataset:
+          type: string
+        bqTable:
+          type: string
+        cronJobName:
+          type: string
+        evidenceSource:
+          type: string
+        note:
+          type: string
+        partnerVariant:
+          type: string
+        repo:
+          type: string
+        schedule:
+          type: string
+        serviceId:
+          type: string
+        triggerKind:
+          type: string
+    UpdateCatalogLibraryRequest:
+      type: object
+      properties:
+        indexDdl:
+          type: boolean
+        repo:
+          type: string
+        serviceName:
+          type: string
+        sourceRoots:
+          type: array
+          items:
+            type: string
+    UpdateServiceModuleRequest:
+      type: object
+      properties:
+        catalogLibraryIds:
+          type: array
+          items:
+            type: string
+        repo:
+          type: string
+        sourceRoots:
+          type: array
+          items:
+            type: string
+    ValidationHintView:
+      type: object
+      properties:
+        envLane:
+          type: string
+        flowStep:
+          type: string
+        hintKind:
+          type: string
+        hintValue:
+          type: string
+        linkedSymbolFqn:
+          type: string
+    WiringTarget:
+      type: object
+      properties:
+        edgeRole:
+          type: string
+        symbolFqn:
           type: string

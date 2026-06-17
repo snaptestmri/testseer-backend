@@ -24,6 +24,8 @@ public class PeripheralDetector {
                 "Use Testcontainers MongoDB for this service");
         checkTier1(result, all, "AmazonS3", "s3",
                 "Use LocalStack (Testcontainers) for this service");
+        checkTier1(result, all, "BasicPublishSubscribeConsumer", "gcp-pubsub",
+                "GCP Pub/Sub consumer — see pubsub_resource_facts via /v1/facts/pubsub");
         if (all.contains("Entity") && all.stream().anyMatch(s -> s.contains("postgresql"))) {
             result.add(tier1("postgres", List.of("@Entity", "postgresql dialect"),
                     "Use Testcontainers PostgreSQL for this service"));

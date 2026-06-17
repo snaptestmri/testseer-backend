@@ -1,0 +1,13 @@
+{
+  "title": "AllOffersResponse",
+  "type": "object",
+  "properties": {
+    "paginationInfo": {
+      "type": "object"
+    },
+    "offer": {
+      "type": "array"
+    }
+  },
+  "required": ["paginationInfo"]
+}

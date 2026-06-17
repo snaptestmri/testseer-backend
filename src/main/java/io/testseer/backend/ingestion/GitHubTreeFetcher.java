@@ -2,6 +2,7 @@ package io.testseer.backend.ingestion;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -16,6 +17,7 @@ public class GitHubTreeFetcher {
 
     private final RestClient restClient;
 
+    @Autowired
     public GitHubTreeFetcher(
             @Value("${testseer.github.token:}") String githubToken) {
         RestClient.Builder builder = RestClient.builder()
@@ -35,6 +37,22 @@ public class GitHubTreeFetcher {
 
     @SuppressWarnings("unchecked")
     public List<String> fetchJavaPaths(String orgId, String repo, String commitSha) {
+        return fetchBlobPaths(orgId, repo, commitSha).stream()
+                .filter(p -> p.endsWith(".java"))
+                .toList();
+    }
+
+    /** JSON paths under configured catalog source roots (BL-046 OpenAPI index). */
+    public List<String> fetchJsonPaths(
+            String orgId, String repo, String commitSha, List<String> sourceRoots) {
+        return fetchBlobPaths(orgId, repo, commitSha).stream()
+                .filter(p -> p.endsWith(".json"))
+                .filter(p -> underAnyRoot(p, sourceRoots))
+                .toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> fetchBlobPaths(String orgId, String repo, String commitSha) {
         Map<String, Object> response = restClient.get()
                 .uri("/repos/{org}/{repo}/git/trees/{sha}?recursive=1",
                         orgId, repo, commitSha)
@@ -55,8 +73,21 @@ public class GitHubTreeFetcher {
         return tree.stream()
                 .filter(e -> "blob".equals(e.get("type")))
                 .map(e -> e.get("path"))
-                .filter(p -> p != null && p.endsWith(".java"))
+                .filter(p -> p != null)
                 .toList();
+    }
+
+    static boolean underAnyRoot(String path, List<String> sourceRoots) {
+        if (sourceRoots == null || sourceRoots.isEmpty()) {
+            return true;
+        }
+        for (String root : sourceRoots) {
+            if (root == null || root.isBlank()) continue;
+            if (path.equals(root) || path.startsWith(root + "/")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @SuppressWarnings("unchecked")

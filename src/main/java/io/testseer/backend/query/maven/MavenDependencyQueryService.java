@@ -84,7 +84,7 @@ public class MavenDependencyQueryService {
         StringBuilder sql = new StringBuilder("""
                 SELECT from_module_path, to_group_id, to_artifact_id, to_version, version_literal,
                        scope, optional, transitive, resolved, unresolved_reason,
-                       linked_service_id, linked_repo
+                       linked_service_id, linked_repo, link_source, cross_repo
                 FROM maven_dependency_facts
                 WHERE service_id = :serviceId AND commit_sha = :commitSha
                 """);
@@ -133,7 +133,9 @@ public class MavenDependencyQueryService {
                 rs.getBoolean("resolved"),
                 rs.getString("unresolved_reason"),
                 rs.getString("linked_service_id"),
-                rs.getString("linked_repo")
+                rs.getString("linked_repo"),
+                rs.getString("link_source"),
+                rs.getBoolean("cross_repo")
         )).list();
     }
 
@@ -161,6 +163,8 @@ public class MavenDependencyQueryService {
             boolean resolved,
             String unresolvedReason,
             String linkedServiceId,
-            String linkedRepo
+            String linkedRepo,
+            String linkSource,
+            boolean crossRepo
     ) {}
 }

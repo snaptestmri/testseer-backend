@@ -1,6 +1,7 @@
 package io.testseer.backend.registry;
 
 import io.testseer.backend.AbstractIntegrationTest;
+import io.testseer.backend.IntegrationTestDb;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,7 +29,7 @@ class ServiceRegistryIntegrationTest extends AbstractIntegrationTest {
 
     @BeforeEach
     void cleanup() {
-        jdbcClient.sql("DELETE FROM service_registry").update();
+        IntegrationTestDb.clearCoreFacts(jdbcClient);
     }
 
     @Test

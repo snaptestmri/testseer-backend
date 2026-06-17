@@ -1,11 +1,13 @@
 package io.testseer.backend.admin;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.testseer.backend.api.TestSeerExceptionHandler;
 import io.testseer.backend.registry.ServiceNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -16,11 +18,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(IndexTriggerController.class)
+@Import(TestSeerExceptionHandler.class)
 class IndexTriggerControllerTest {
 
     @Autowired MockMvc mockMvc;
     @Autowired ObjectMapper objectMapper;
     @MockBean IndexTriggerService triggerService;
+    @MockBean io.testseer.backend.observability.TestSeerMetrics metrics;
 
     @Test
     void trigger_returns202_withJobDetails() throws Exception {
@@ -31,6 +35,7 @@ class IndexTriggerControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"commitSha\":\"abc123\"}"))
                 .andExpect(status().isAccepted())
+                .andExpect(header().string("X-Job-Id", "job-123"))
                 .andExpect(jsonPath("$.jobId").value("job-123"))
                 .andExpect(jsonPath("$.commitSha").value("abc123"))
                 .andExpect(jsonPath("$.fileCount").value(42));
@@ -54,7 +59,8 @@ class IndexTriggerControllerTest {
         mockMvc.perform(post("/admin/index/svc-unknown")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
     }
 
     @Test
@@ -65,6 +71,7 @@ class IndexTriggerControllerTest {
         mockMvc.perform(post("/admin/index/svc-001")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
-                .andExpect(status().isConflict());
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("CONFLICT"));
     }
 }

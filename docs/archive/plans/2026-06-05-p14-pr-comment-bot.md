@@ -1,6 +1,7 @@
-# P14: GitHub PR Comment Bot (PLANNED)
+# P14: GitHub PR Comment Bot
 
-> **Status:** Not implemented. Consumer-only — no new analysis logic.
+> **Status:** v1 **shipped** (2026-06-15). Canonical spec: [23-pr-comment-bot.md](../../features/23-pr-comment-bot.md)  
+> **v2 (cross-repo fan-out):** BL-049 · PRB-20–25 in feature doc
 
 **Goal:** When a PR opens or synchronizes, run impact analysis and post a formatted comment on the PR.
 
@@ -13,9 +14,9 @@
 ```
 GitHub webhook (pull_request opened/synchronize)
   → wait for indexing COMPLETE for head SHA
-  → GET /v1/impact/pr?serviceId=&commitSha=
+  → ImpactAnalysisService + GapDetectionService + ConsistencyGapService (in-process)
   → format comment
-  → GitHub API POST /repos/{owner}/{repo}/issues/{pr}/comments
+  → GitHub API POST/PATCH /repos/{owner}/{repo}/issues/{pr}/comments
 ```
 
 ---
@@ -35,33 +36,32 @@ Suggested test scope:
 
 Map from `ImpactReport`:
 - `changedSymbols` → Changed line
-- `affectedConsumers` → Affected services
+- `affectedConsumers` → Affected services (may include **other repos** — display only in v1)
 - `suggestedTestScope` with `exists: true|false` → test list with ⚠️ for gaps
 
 ---
 
-## Requirements
+## Requirements (summary)
 
-- GitHub App with `pull_requests: write` and `contents: read`
-- Reuse existing `WebhookController` PR ingestion path; add post-index callback
-- Handle indexing-in-progress (202) — poll or defer comment until COMPLETE
-- Idempotent: update existing TestSeer comment on re-sync rather than spamming
+See [PRB-01–PRB-12](../../features/23-pr-comment-bot.md#functional-requirements) in the feature doc.
 
 ---
 
-## File structure (planned)
+## File structure (shipped)
 
 ```
-testseer-backend/src/main/java/io/testseer/backend/
-└── github/
-    ├── PrCommentFormatter.java
-    ├── PrCommentPublisher.java
-    └── PrAnalysisOrchestrator.java   — triggers after WorkerPipeline complete for PR jobs
+testseer-backend/src/main/java/io/testseer/backend/github/
+├── PrCommentFormatter.java
+├── PrCommentPublisher.java
+└── PrImpactCommentService.java
 ```
+
+Hook: `WorkerPipeline` after `markComplete`.
 
 ---
 
-## Out of scope
+## Out of scope (v1)
 
-- New analysis endpoints
-- Inline review comments on diff lines (v2)
+- Posting on consumer repos (v2 PRB-20)
+- Companion PR linking (v2 PRB-21)
+- Inline review comments on diff lines (v3 PRB-30)

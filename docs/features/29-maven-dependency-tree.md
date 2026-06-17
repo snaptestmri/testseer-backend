@@ -1,7 +1,7 @@
 # Feature: Maven Dependency Tree + Artifact Versioning (BL-058)
 
 > **Status:** Shipped (2026-06-16)  
-> **Design:** [TestSeer_BL058_Maven_Dependency_Tree_Design.md](../TestSeer_BL058_Maven_Dependency_Tree_Design.md)  
+> **Design:** [TestSeer_BL058_Maven_Dependency_Tree_Design.md](../TestSeer_BL058_Maven_Dependency_Tree_Design.md) · [AC-MVN-4 linkedServiceId](../TestSeer_AC_MVN_4_Internal_Artifact_Link_Design.md)  
 > **Req IDs:** MVN-01–MVN-18  
 > **Backlog:** BL-058 (Done)  
 > **Pilot:** `platform-transaction-eval-consumer` → parent `evaluation-common` / `redemption-common`
@@ -66,6 +66,9 @@ Standard `ResponseEnvelope` + freshness (`CURRENT` | `STALE` | `INDEXING` | `NOT
 ```bash
 curl "http://localhost:8080/v1/facts/maven-dependencies?serviceId=UUID&scope=runtime"
 curl "http://localhost:8080/v1/graph/dependency-tree?serviceId=UUID&scope=runtime&hydrate=true"
+curl -X POST "http://localhost:8080/admin/maven/backfill-links" \
+  -H 'Content-Type: application/json' \
+  -d '{"orgId":"quotient","syncOwnedByEdges":true}'
 ```
 
 ## MCP
@@ -89,7 +92,20 @@ See [08-mcp-agent-integration.md](08-mcp-agent-integration.md).
 |------|---------|
 | `CONTAINS_MODULE` | Parent POM → child module |
 | `DEPENDS_ON_ARTIFACT` | Module → resolved GAV (direct or transitive) |
+| `OWNED_BY` | Internal `ARTIFACT` → owning `SERVICE` when `crossRepo=true` |
 | `USES_TYPE` | **Keep** — Java-level type usage |
+
+## Admin — link backfill
+
+After deploying linker or `quotient-artifacts.yml` changes, refresh existing facts without a full re-index:
+
+```bash
+curl -X POST "$BASE/admin/maven/backfill-links" \
+  -H 'Content-Type: application/json' \
+  -d '{"orgId":"quotient","syncOwnedByEdges":true}'
+```
+
+Optional `serviceId` scopes to one consumer. Set `syncOwnedByEdges: true` to upsert `OWNED_BY` graph edges.
 
 ## Key classes
 
@@ -99,7 +115,9 @@ See [08-mcp-agent-integration.md](08-mcp-agent-integration.md).
 | `MavenDependencyTreeResolver` | P2 `mvn dependency:tree` |
 | `MavenFactOrchestrator` | Index wiring |
 | `MavenGraphProjector` | Graph projection |
-| `InternalArtifactLinker` | P3 cross-repo `com.quotient:*` |
+| `InternalArtifactLinker` | P3 cross-repo link (GAV / catalog / registry / alias) |
+| `ArtifactLinkRulePackLoader` | `quotient-artifacts.yml` GAV aliases |
+| `MavenLinkBackfillService` | Admin backfill of `linked_service_id` without full re-index |
 | `MavenDependencyQueryService` | Facts API |
 | `DependencyTreeGraphService` | Tree BFS + hydration |
 | `MavenScopeFilter` | Runtime scope includes compile |
@@ -115,7 +133,7 @@ See [08-mcp-agent-integration.md](08-mcp-agent-integration.md).
 | AC-MVN-1 | `maven_module_facts` ≥ 1 | **12** modules on `transaction-eval-suite` |
 | AC-MVN-2 | Runtime classpath deps indexed | **70** deps (`scope=runtime`) |
 | AC-MVN-3 | Hydrated dependency tree | Consumer module tree with nodes/edges |
-| AC-MVN-4 | `linkedServiceId` on internal GAV | Partial — requires multi-service index |
+| AC-MVN-4 | `linkedServiceId` on internal GAV | **Shipped** — re-index consumer or `POST /admin/maven/backfill-links` |
 | AC-MVN-5 | PR `artifactImpact[]` | Implemented (P4b) |
 | AC-MVN-6 | Class reachability unchanged | Verified — no `DEPENDS_ON_ARTIFACT` in class CTE |
 

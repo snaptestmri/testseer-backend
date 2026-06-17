@@ -1,0 +1,9 @@
+{
+  "title": "RedeemResponse",
+  "type": "object",
+  "properties": {
+    "redemptionStatus": {
+      "type": "string"
+    }
+  }
+}

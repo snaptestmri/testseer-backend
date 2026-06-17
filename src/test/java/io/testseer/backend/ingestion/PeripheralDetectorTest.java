@@ -62,20 +62,20 @@ class PeripheralDetectorTest {
     }
 
     private static ParsedModel modelWithAnnotations(List<String> annotations) {
-        return new ParsedModel("Svc.java", "com.example.Svc",
+        return ParsedModel.of("Svc.java", "com.example.Svc",
                 annotations, List.of(), List.of(), List.of(), List.of(), false, null,
                 null, List.of(), List.of());
     }
 
     private static ParsedModel modelWithFieldType(String type) {
-        return new ParsedModel("Svc.java", "com.example.Svc",
+        return ParsedModel.of("Svc.java", "com.example.Svc",
                 List.of(), List.of(), List.of(type), List.of(), List.of(), false, null,
                 null, List.of(), List.of());
     }
 
     private static ParsedModel modelWithClassContent(ParsedModel base, String keyword) {
         // Simulate oracle detection via constructor params or field types
-        return new ParsedModel(base.filePath(), base.classFqn(),
+        return ParsedModel.of(base.filePath(), base.classFqn(),
                 base.annotations(), List.of(keyword), base.fieldInjectionTypes(),
                 base.endpoints(), base.outboundCalls(), false, null,
                 null, List.of(), List.of());

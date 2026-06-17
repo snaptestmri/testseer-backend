@@ -9,15 +9,25 @@ import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
+import io.testseer.backend.ingestion.catalog.ImportIndex;
+import io.testseer.backend.ingestion.catalog.TypeFqnResolver;
+import io.testseer.backend.ingestion.graph.FactoryRoutingExtractor;
+import io.testseer.backend.ingestion.graph.MethodCallGraphExtractor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 @Component
 public class JavaParserService {
+
+    private static final Logger log = LoggerFactory.getLogger(JavaParserService.class);
 
     private static final Map<String, String> HTTP_VERBS = Map.of(
             "get", "GET", "post", "POST", "put", "PUT",
@@ -38,22 +48,38 @@ public class JavaParserService {
     );
 
     private final JavaParser parser;
+    private final TypeFqnResolver typeFqnResolver;
 
-    public JavaParserService() {
+    public JavaParserService(TypeFqnResolver typeFqnResolver) {
         this.parser = new JavaParser();
+        this.typeFqnResolver = typeFqnResolver;
+    }
+
+    /** Test / legacy no-arg — FQN resolution degrades to simple names. */
+    JavaParserService() {
+        this(null);
     }
 
     public ParsedModel parse(String filePath, String sourceContent) {
-        ParseResult<CompilationUnit> result = parser.parse(sourceContent);
+        if (sourceContent == null || sourceContent.isBlank()) {
+            String detail = sourceContent == null ? "null source content" : "empty source content";
+            log.warn("Skipping parse for {}: {}", filePath, detail);
+            return parseErrorModel(filePath, detail);
+        }
+
+        ParseResult<CompilationUnit> result;
+        try {
+            result = parser.parse(sourceContent);
+        } catch (AssertionError | RuntimeException ex) {
+            String detail = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
+            log.warn("JavaParser failed for {}: {}", filePath, detail);
+            return parseErrorModel(filePath, detail);
+        }
 
         if (!result.isSuccessful() || result.getResult().isEmpty()) {
             String detail = result.getProblems().isEmpty() ? "unknown parse error"
                     : result.getProblems().get(0).getMessage();
-            return new ParsedModel(
-                    filePath, null, List.of(), List.of(), List.of(),
-                    List.of(), List.of(), true, detail,
-                    null, List.of(), List.of()
-            );
+            return parseErrorModel(filePath, detail);
         }
 
         CompilationUnit cu = result.getResult().get();
@@ -85,14 +111,14 @@ public class JavaParserService {
                         .map(AnnotationExpr::getNameAsString).toList();
                 List<String> enumValues = en.getEntries().stream()
                         .map(e -> e.getNameAsString()).toList();
-                return new ParsedModel(
+                return ParsedModel.of(
                         filePath, enumFqn, enumAnnotations, List.of(), List.of(),
                         List.of(), List.of(), false, null,
                         extractJavadoc(en), List.of(), enumValues
                 );
             }
             // Not a class, interface, or enum
-            return new ParsedModel(filePath, null, List.of(), List.of(), List.of(),
+            return ParsedModel.of(filePath, null, List.of(), List.of(), List.of(),
                     List.of(), List.of(), false, null,
                     null, List.of(), List.of());
         }
@@ -113,12 +139,11 @@ public class JavaParserService {
                         .toList())
                 .orElse(List.of());
 
-        List<String> fieldInjections = cls.getFields().stream()
-                .filter(f -> f.getAnnotations().stream()
-                        .anyMatch(a -> a.getNameAsString().equals("Autowired")))
-                .flatMap(f -> f.getVariables().stream())
-                .map(v -> v.getType().asString())
-                .toList();
+        List<ParsedModel.FieldInjectionDef> fieldInjectionDefs =
+                MethodCallGraphExtractor.extractFieldInjections(cls);
+        Set<String> depTypes = new LinkedHashSet<>(constructorParams);
+        fieldInjectionDefs.forEach(f -> depTypes.add(f.declaredType()));
+        List<String> fieldInjections = List.copyOf(depTypes);
 
         List<ParsedModel.EndpointDef> endpoints = extractEndpoints(cls);
         List<ParsedModel.OutboundCallDef> outboundCalls = extractOutboundCalls(cls);
@@ -140,10 +165,36 @@ public class JavaParserService {
         String classJavadoc = extractJavadoc(cls);
         List<ParsedModel.MethodDef> publicMethods = extractPublicMethods(cls);
 
+        ImportIndex imports = ImportIndex.build(sourceContent);
+        var typeCtx = new TypeFqnResolver.CompilationContext(null, null, classFqn);
+        MethodCallGraphExtractor.FieldTypeResolver typeResolver =
+                typeName -> typeFqnResolver != null
+                        ? typeFqnResolver.resolve(typeName, imports, typeCtx).fqn()
+                        : typeName;
+
+        List<ParsedModel.MethodCallDef> methodCalls =
+                MethodCallGraphExtractor.extract(cls, classFqn, fieldInjectionDefs, typeResolver);
+
+        FactoryRoutingExtractor.BeanNameResolver beanResolver = new FactoryRoutingExtractor.BeanNameResolver() {
+            @Override
+            public String resolveBeanName(String beanName) {
+                return null;
+            }
+
+            @Override
+            public String resolveType(String typeName) {
+                return typeResolver.resolve(typeName);
+            }
+        };
+        List<ParsedModel.FactoryRoutingDef> factoryRouting =
+                FactoryRoutingExtractor.extract(cls, classFqn, fieldInjectionDefs, beanResolver);
+        String componentBeanName = FactoryRoutingExtractor.extractComponentBeanName(cls);
+
         return new ParsedModel(
                 filePath, classFqn, annotations, constructorParams,
                 fieldInjections, endpoints, outboundCalls, false, null,
-                classJavadoc, publicMethods, List.of()
+                classJavadoc, publicMethods, List.of(),
+                fieldInjectionDefs, methodCalls, factoryRouting, componentBeanName
         );
     }
 
@@ -212,6 +263,21 @@ public class JavaParserService {
             ClassOrInterfaceDeclaration cls) {
         List<ParsedModel.OutboundCallDef> result = new ArrayList<>();
 
+        if (extendsRestService(cls)) {
+            String configPrefix = configurationPropertiesPrefix(cls);
+            boolean hasOutboundCall = cls.getMethods().stream()
+                    .flatMap(m -> m.findAll(MethodCallExpr.class).stream())
+                    .anyMatch(c -> "callWithRetry".equals(c.getNameAsString()));
+            if (hasOutboundCall || configPrefix != null) {
+                result.add(new ParsedModel.OutboundCallDef(
+                        "RestService",
+                        "POST",
+                        configPrefix,
+                        cls.getNameAsString()
+                ));
+            }
+        }
+
         // Method-body traversal: RestClient / WebClient
         // Pattern: <scope>.get().uri("path"), <scope>.post().uri("path"), etc.
         cls.getMethods().forEach(method -> {
@@ -240,6 +306,31 @@ public class JavaParserService {
                     String rawArg = call.getArgument(0).toString().replace("\"", "");
                     result.add(new ParsedModel.OutboundCallDef(
                             "RestTemplate", tmVerb, rawArg,
+                            cls.getNameAsString() + "#" + method.getNameAsString()
+                    ));
+                }
+
+                // RestTemplate/WebClient: exchange(uri, HttpMethod.POST, ...)
+                if ("exchange".equals(call.getNameAsString()) && call.getArguments().size() >= 2) {
+                    String uriArg = call.getArgument(0).toString().replace("\"", "");
+                    String httpMethod = extractHttpMethodFromExpr(call.getArgument(1).toString());
+                    String clientType = call.getScope()
+                            .map(s -> s.toString().contains("WebClient") ? "WebClient" : "RestTemplate")
+                            .orElse("RestTemplate");
+                    result.add(new ParsedModel.OutboundCallDef(
+                            clientType,
+                            httpMethod,
+                            uriArg.startsWith("\"") ? uriArg : null,
+                            cls.getNameAsString() + "#" + method.getNameAsString()
+                    ));
+                }
+
+                if ("createWorkbenchSubmission".equals(call.getNameAsString())) {
+                    String clientType = call.getScope().map(Expression::toString).orElse("WorkbenchSubmissionRestClient");
+                    result.add(new ParsedModel.OutboundCallDef(
+                            clientType,
+                            "POST",
+                            "/workbench/submission",
                             cls.getNameAsString() + "#" + method.getNameAsString()
                     ));
                 }
@@ -273,5 +364,38 @@ public class JavaParserService {
                     .findFirst().orElse(defaultValue);
         }
         return defaultValue;
+    }
+
+    private static String extractHttpMethodFromExpr(String expr) {
+        if (expr == null) return null;
+        if (expr.contains("HttpMethod.POST") || expr.contains(".POST")) return "POST";
+        if (expr.contains("HttpMethod.PUT") || expr.contains(".PUT")) return "PUT";
+        if (expr.contains("HttpMethod.GET") || expr.contains(".GET")) return "GET";
+        if (expr.contains("HttpMethod.DELETE") || expr.contains(".DELETE")) return "DELETE";
+        if (expr.contains("HttpMethod.PATCH") || expr.contains(".PATCH")) return "PATCH";
+        return null;
+    }
+
+    private static boolean extendsRestService(ClassOrInterfaceDeclaration cls) {
+        return cls.getExtendedTypes().stream()
+                .anyMatch(t -> t.getNameAsString().equals("RestService")
+                        || t.toString().contains("RestService"));
+    }
+
+    private static String configurationPropertiesPrefix(ClassOrInterfaceDeclaration cls) {
+        return cls.getAnnotations().stream()
+                .filter(a -> a.getNameAsString().equals("ConfigurationProperties"))
+                .map(a -> annotationValue(a, null))
+                .filter(v -> v != null && !v.isBlank())
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static ParsedModel parseErrorModel(String filePath, String detail) {
+        return ParsedModel.of(
+                filePath, null, List.of(), List.of(), List.of(),
+                List.of(), List.of(), true, detail,
+                null, List.of(), List.of()
+        );
     }
 }

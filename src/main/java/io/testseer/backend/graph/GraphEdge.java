@@ -22,4 +22,24 @@ public record GraphEdge(
     public static GraphEdge usesType(String from, String to) {
         return new GraphEdge(from, to, "USES_TYPE", 1.0, "javaparser");
     }
+
+    public static GraphEdge invokes(String from, String to) {
+        return new GraphEdge(from, to, "INVOKES", 0.9, "javaparser");
+    }
+
+    public static GraphEdge routesTo(String from, String to) {
+        return new GraphEdge(from, to, "ROUTES_TO", 0.95, "factory-routing");
+    }
+
+    public static GraphEdge callsExternal(String from, String to, double confidence) {
+        return new GraphEdge(from, to, "CALLS_EXTERNAL", confidence, "external-endpoint-indexer");
+    }
+
+    public static GraphEdge triggeredBy(String triggerNode, String handlerNode, double confidence) {
+        return new GraphEdge(triggerNode, handlerNode, "TRIGGERED_BY", confidence, "entry-trigger-indexer");
+    }
+
+    public static GraphEdge wires(String from, String to) {
+        return new GraphEdge(from, to, "WIRES", 0.88, "component-scan");
+    }
 }

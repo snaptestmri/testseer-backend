@@ -18,6 +18,17 @@ public record LocalIndexTriggerResponse(
         @Schema(description = "Number of .java files found and submitted for analysis", example = "47")
         int fileCount,
 
+        @Schema(description = "Number of YAML application config and .proto files submitted for messaging analysis",
+                example = "31")
+        int configFileCount,
+
+        @Schema(description = "Number of OpenAPI/JSON spec files submitted (catalog libraries with indexOpenApi)",
+                example = "298")
+        int openApiFileCount,
+
+        @Schema(description = "Number of DDL/SQL files submitted (catalog libraries with indexDdl)", example = "12")
+        int ddlFileCount,
+
         @Schema(description = "True if the service was newly registered during this request; false if it already existed",
                 example = "true")
         boolean autoRegistered

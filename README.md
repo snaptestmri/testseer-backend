@@ -1,9 +1,11 @@
 # TestSeer Backend
 
 > **Status:** Canonical  
-> **Last verified:** 2026-06-05  
+> **Last verified:** 2026-06-15  
 > **Platform status:** [../docs/CURRENT_STATUS.md](../docs/CURRENT_STATUS.md)  
-> **Architecture docs:** [docs/README.md](docs/README.md)
+> **Architecture docs:** [docs/README.md](docs/README.md)  
+> **API reference:** [docs/API_REFERENCE.md](docs/API_REFERENCE.md)  
+> **REST conventions:** [docs/TestSeer_REST_API_Design.md](docs/TestSeer_REST_API_Design.md)
 
 Central indexing and analysis platform for [TestSeer](https://github.com/snaptestmri/testseer-mcp). Parses Java services, builds a cross-service knowledge graph, and answers the question: **given a PR that changed X, what should the developer test?**
 
@@ -103,6 +105,13 @@ Regenerate after API changes:
 mvn test -Dtest=OpenApiExportTest
 ```
 
+Verify the committed spec matches the live export (CI gate):
+
+```bash
+../scripts/openapi-governance-check.sh
+# or: mvn test -Dtest=OpenApiGovernanceTest
+```
+
 Download from a running server:
 
 ```bash
@@ -135,13 +144,44 @@ API tags in Swagger UI: **Service Registry**, **Webhook**, **Admin — Indexing*
 | | `GET /v1/graph/neighborhood` | Depth-1 neighbours |
 | | `GET /v1/graph/shared-type` | Shared library type lookup |
 | | `GET /v1/graph/type-fanout` | All consumers of a type |
-| | — | `crossServiceBoundary` exists in `GraphProjectionService` but has **no REST route** |
+| | `GET /v1/graph/cross-service-boundary` | Cross-service type boundary lookup |
+| | `GET /v1/graph/event-flow` | Single-service Pub/Sub event-flow trace |
+| | `GET /v1/graph/event-flow/cross-repo` | Org-wide cross-repo trace; `consistencyHints[]`; optional `?liveVerify=true` (MSG-10) |
+| **Messaging (Option C)** | `GET /v1/facts/pubsub` | Pub/Sub inventory |
+| | `GET /v1/facts/message-schema` | Protobuf / payload schemas |
+| | `GET /v1/facts/data-access` | Handler DB touchpoints; `consistencyHints[]` per row |
+| | `GET /v1/facts/gates` | Flow gates (with optional live overlay) |
+| | `GET /v1/gaps/messaging` | Messaging topology gaps |
+| **Consistency** | `GET /v1/consistency/scenarios` | Inferred + rule-pack scenarios |
+| | `GET /v1/gaps/consistency` | Unlinked mirrors, undocumented dual-writes |
+| **Portfolio** | `GET /v1/gaps` | Test coverage gaps across indexed services |
+| **Catalog** | `GET /v1/catalog/data-objects` | Entity catalog (MariaDB, Cassandra, Mongo, BQ) |
+| **Workspace** | `GET/POST /v1/workspace/*` | Org-scoped catalog library config |
 | **Analysis** | `GET /v1/impact/pr` | **PR impact analysis** — changed symbols, callers, test suggestions |
-| | — | `GET /v1/gaps` — **planned (P12)**; partial substitute: `missingTestClasses` in impact response |
 | | `GET /v1/services/{id}/description` | LLM-generated service description |
 | | `POST /v1/services/{id}/description` | Regenerate description |
 
 All query endpoints return a `ResponseEnvelope` with `freshnessStatus`: `CURRENT`, `STALE`, `INDEXING`, or `NOT_INDEXED`.
+
+### Freshness HTTP (P16)
+
+| `freshnessStatus` | HTTP |
+|-------------------|------|
+| `NOT_INDEXED` | **404** |
+| `INDEXING` | **202** |
+| `CURRENT` / `STALE` | **200** |
+
+Applies to `/v1/facts/*`, `/v1/graph/*`, and Option C messaging routes. Exception: `GET /v1/status/{serviceId}` always **200**.
+
+### Error responses (P16)
+
+Commands, registry, admin, and description endpoints return **`ApiError` JSON** on failure:
+
+```json
+{ "error": "CONFLICT", "message": "...", "hint": "...", "requestId": "..." }
+```
+
+Enums: `VALIDATION_ERROR`, `NOT_FOUND`, `CONFLICT`, `SERVICE_UNAVAILABLE`, `INTERNAL_ERROR`. Global handler: `io.testseer.backend.api.TestSeerExceptionHandler`.
 
 ## Impact analysis response
 
@@ -165,32 +205,27 @@ Environment variables (defaults in parentheses):
 | `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` | Redis cache |
 | `KAFKA_BOOTSTRAP` | `localhost:9092` | Kafka brokers |
 | `PUBSUB_ENABLED` | `false` | Enable GCP Pub/Sub cache invalidation |
-| `ANTHROPIC_ENABLED` | `false` | Enable LLM service descriptions |
-| `ANTHROPIC_API_KEY` | — | Anthropic API key |
-
 ## Development
 
 ```bash
-# Run tests (requires Docker for Testcontainers)
-mvn test
-
-# Run a single test class
-mvn test -Dtest=ImpactAnalysisControllerTest
+# Run tests (requires Docker for Testcontainers; use mvn21 on macOS/Colima)
+./mvn21 test   # 281 tests as of 2026-06-15
 ```
 
 ## Project structure
 
 ```
 src/main/java/io/testseer/backend/
+├── api/               ApiError, TestSeerExceptionHandler, RequestIdHolder (P16)
 ├── registry/          Service registration
 ├── webhook/           GitHub webhook + Kafka job publishing
 ├── ingestion/         Workers, JavaParser, fact extraction, dual-write
 ├── graph/             Graph projection (nodes, edges, CTE queries)
-├── query/             Facts, graph, status REST controllers
+├── query/             Facts, graph, messaging flow, consistency, status REST; FreshnessHttp
 ├── analysis/          Impact analysis + service description
 └── admin/             Index triggers, org discovery
 
-src/main/resources/db/migration/   Flyway migrations (V1–V7)
+src/main/resources/db/migration/   Flyway migrations (V1–V13)
 ```
 
 ## Related projects
